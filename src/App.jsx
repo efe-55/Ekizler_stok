@@ -398,24 +398,32 @@ function AmbarPage({ markalar, sayimlar, onSelect }) {
   ayMarkalari.forEach((m) => gruplar[urunTipiSinifla(m)].push(m));
   ["Patates", "Soğan", "Diğer"].forEach((k) => gruplar[k].sort((a, b) => (a.tarih < b.tarih ? -1 : a.tarih > b.tarih ? 1 : 0)));
 
-  function satirVeOzet(m) {
-    const son = sayimlar.filter((s) => s.markaId === m.id).sort((a, b) => b.sayimNo - a.sayimNo)[0];
-    const oz = son ? sayimOzet(son, m) : null;
-    return { m, oz };
+  // Her grubun (Patates/Soğan/Diğer) satırlarını ve alt toplamını RENDER'dan ÖNCE, düz bir
+  // hesapla belirliyoruz — bileşen render olurken dışarıdaki değişkeni "biriktirmeye" çalışmak
+  // (önceki hata) JSX'in değerlendirilme sırasına bağlı kalıp yanlış (0) sonuç veriyordu.
+  function grupOzetiHesapla(liste) {
+    let toplam = 0;
+    const satirlar = liste.map((m) => {
+      const son = sayimlar.filter((s) => s.markaId === m.id).sort((a, b) => b.sayimNo - a.sayimNo)[0];
+      const oz = son ? sayimOzet(son, m) : null;
+      if (oz) toplam += oz.fark;
+      return { m, oz };
+    });
+    return { satirlar, toplam };
   }
 
-  let genelFark = 0;
+  const patatesOzet = grupOzetiHesapla(gruplar.Patates);
+  const soganOzet = grupOzetiHesapla(gruplar.Soğan);
+  const digerOzet = grupOzetiHesapla(gruplar.Diğer);
+  const genelFark = patatesOzet.toplam + soganOzet.toplam + digerOzet.toplam;
 
-  const GrupBlok = ({ baslik, liste }) => {
-    if (liste.length === 0) return null;
-    let grupFark = 0;
+  function GrupBlok({ baslik, ozet }) {
+    if (ozet.satirlar.length === 0) return null;
     return (
       <div>
-        <p className="text-xs font-medium text-stone-500 mb-2">{baslik} ({liste.length})</p>
+        <p className="text-xs font-medium text-stone-500 mb-2">{baslik} ({ozet.satirlar.length})</p>
         <div className="rounded-lg border border-stone-200 bg-white divide-y divide-stone-100">
-          {liste.map((m) => {
-            const { oz } = satirVeOzet(m);
-            if (oz) { grupFark += oz.fark; genelFark += oz.fark; }
+          {ozet.satirlar.map(({ m, oz }) => {
             const flagged = oz && Math.abs(oz.fark) > esikDegeri(m);
             return (
               <button key={m.id} onClick={() => onSelect(m.id)} className="w-full text-left px-4 py-3 hover:bg-stone-50 flex items-center justify-between gap-3 flex-wrap">
@@ -433,11 +441,11 @@ function AmbarPage({ markalar, sayimlar, onSelect }) {
           })}
         </div>
         <div className="text-right text-xs text-stone-500 mt-1.5 pr-1">
-          {ayEtiket(seciliAy)} {baslik} Genel Toplam: <span className={`font-mono font-medium ${Math.abs(grupFark) > 150 ? "text-red-600" : "text-emerald-700"}`}>{grupFark > 0 ? "+" : ""}{fmt(grupFark)} kg</span>
+          {ayEtiket(seciliAy)} {baslik} Genel Toplam: <span className={`font-mono font-medium ${Math.abs(ozet.toplam) > 150 ? "text-red-600" : "text-emerald-700"}`}>{ozet.toplam > 0 ? "+" : ""}{fmt(ozet.toplam)} kg</span>
         </div>
       </div>
     );
-  };
+  }
 
   return (
     <div className="space-y-5">
@@ -446,9 +454,9 @@ function AmbarPage({ markalar, sayimlar, onSelect }) {
       </button>
       <h2 className="text-base font-medium">{ayEtiket(seciliAy)}</h2>
 
-      <GrupBlok baslik="Patates" liste={gruplar.Patates} />
-      <GrupBlok baslik="Soğan" liste={gruplar.Soğan} />
-      <GrupBlok baslik="Diğer" liste={gruplar.Diğer} />
+      <GrupBlok baslik="Patates" ozet={patatesOzet} />
+      <GrupBlok baslik="Soğan" ozet={soganOzet} />
+      <GrupBlok baslik="Diğer" ozet={digerOzet} />
 
       <div className="rounded-lg border border-stone-300 bg-stone-50 px-4 py-3 flex items-center justify-between">
         <span className="text-sm font-medium">{ayEtiket(seciliAy)} Genel Toplam ({ayMarkalari.length} marka)</span>
@@ -1046,18 +1054,9 @@ function DukkandaKalanPage({ markalar, sayimlar, etkinlikler, kalanTopluKaydet }
 
   const aktifMarkalar = markalar.filter((m) => m.durum !== "tamamlandı");
 
-  const sonKullanilanlar = (() => {
-    const goruldu = new Set();
-    const sonuc = [];
-    [...etkinlikler].sort((a, b) => new Date(b.ts) - new Date(a.ts)).forEach((e) => {
-      if (goruldu.has(e.markaId)) return;
-      const m = aktifMarkalar.find((x) => x.id === e.markaId);
-      if (!m) return;
-      goruldu.add(e.markaId);
-      sonuc.push(m);
-    });
-    return sonuc.slice(0, 8);
-  })();
+  // "Son gelenler": etkinlik geçmişine değil, doğrudan markanın GELİŞ TARİHİNE göre en yeni 10 tanesi —
+  // hep güncel kalsın diye (aktif liste geliş tarihi değiştikçe kendiliğinden değişir).
+  const sonGelenler = [...aktifMarkalar].sort((a, b) => (b.tarih || "").localeCompare(a.tarih || "")).slice(0, 10);
 
   const aramaSonuclari = arama.trim()
     ? aktifMarkalar.filter((m) => `${m.marka} ${m.urun}`.toLocaleUpperCase("tr").includes(arama.toLocaleUpperCase("tr"))).slice(0, 15)
@@ -1140,11 +1139,11 @@ function DukkandaKalanPage({ markalar, sayimlar, etkinlikler, kalanTopluKaydet }
         )}
       </div>
 
-      {!arama && sonKullanilanlar.length > 0 && (
+      {!arama && sonGelenler.length > 0 && (
         <div>
-          <p className="text-xs text-stone-400 mb-1.5">Son kullanılanlar</p>
+          <p className="text-xs text-stone-400 mb-1.5">Son gelen 10 marka (geliş tarihine göre)</p>
           <div className="flex flex-wrap gap-1.5">
-            {sonKullanilanlar.map((m) => (
+            {sonGelenler.map((m) => (
               <button key={m.id} onClick={() => markaEkle(m)} disabled={secilenler.includes(m.id)} className={`text-xs rounded-full px-3 py-1.5 border ${secilenler.includes(m.id) ? "border-stone-200 bg-stone-100 text-stone-400" : "border-stone-200 hover:border-amber-400 text-stone-700"}`}>
                 {m.marka} · {m.urun}
               </button>
@@ -1166,7 +1165,10 @@ function DukkandaKalanPage({ markalar, sayimlar, etkinlikler, kalanTopluKaydet }
                 </div>
                 {m.urunler.map((u) => (
                   <div key={u.id} className="flex items-center justify-between gap-3">
-                    <div className="text-sm">{u.ad}</div>
+                    <div>
+                      <div className="text-sm">{u.ad}</div>
+                      <div className="text-xs text-stone-400">Yüklenen: {fmt(u.yuklemeAdet)} adet</div>
+                    </div>
                     <Stepper value={degerler[id]?.[u.id] ?? "0"} onChange={(v) => setDegerler((prev) => ({ ...prev, [id]: { ...prev[id], [u.id]: v } }))} />
                   </div>
                 ))}
