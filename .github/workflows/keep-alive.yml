@@ -1,0 +1,28 @@
+name: Supabase Uyandırma (Keep Alive)
+
+# Amaç: Supabase'in ücretsiz katmanı, 7 gün hiç istek gelmezse projeyi otomatik durdurur.
+# Bu görev haftada iki kez (Pazartesi ve Perşembe) veritabanına ufak, zararsız bir sorgu
+# göndererek "hâlâ kullanılıyor" sinyali verir — böylece proje asla duraklamaz.
+# Hiçbir maliyeti yoktur, GitHub'ın ücretsiz Actions kotasının çok küçük bir kısmını kullanır.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1,4" # Her Pazartesi ve Perşembe, 06:00 UTC (yaklaşık 09:00 Türkiye saati)
+  workflow_dispatch: {} # İsterseniz sağdaki "Run workflow" ile elle de tetikleyebilirsiniz
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Supabase'e hafif bir istek gönder
+        run: |
+          HTTP_KOD=$(curl -s -o /dev/null -w "%{http_code}" \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/kv_store?select=key&limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}")
+          echo "Supabase yanıt kodu: $HTTP_KOD"
+          if [ "$HTTP_KOD" -ge 200 ] && [ "$HTTP_KOD" -lt 300 ]; then
+            echo "Başarılı — proje aktif tutuldu."
+          else
+            echo "Beklenmeyen kod, kontrol edin (yine de bazı 4xx kodları normal olabilir, önemli olan Supabase'e ulaşmak)."
+          fi
