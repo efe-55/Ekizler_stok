@@ -40,6 +40,23 @@ Bu ikisine birazdan ihtiyacımız olacak.
 Bu adresi artık siz ve çalışanlarınız telefon, tablet, bilgisayar fark etmeksizin açabilir — hepsi
 **aynı veriyi** görür ve günceller.
 
+## 4. Veritabanının hiç "uyumaması" için son bir adım (önemli)
+
+Supabase'in ücretsiz katmanı, **7 gün boyunca hiç kullanılmazsa** projeyi otomatik durduruyor — biri
+elle "devam ettir" demeden site hata vermeye başlar. Bu klasörde bunu önleyen, haftada iki kez
+otomatik "merhaba" mesajı gönderen ücretsiz bir görev (`keep-alive.yml`) zaten hazır — sadece
+GitHub'a iki gizli bilgiyi tanıtmanız gerekiyor:
+
+1. GitHub'daki repository'nizde **Settings** sekmesine girin.
+2. Sol menüden **Secrets and variables > Actions**'ı açın.
+3. **New repository secret** deyip sırayla şu ikisini ekleyin:
+   - İsim: `SUPABASE_URL` → Değer: Supabase'teki Project URL (1. adımda not ettiğiniz)
+   - İsim: `SUPABASE_ANON_KEY` → Değer: Supabase'teki anon public anahtarı
+4. Bu kadar. Görev otomatik olarak her Pazartesi ve Perşembe çalışıp veritabanınızı uyanık tutacak — siz hiçbir şey yapmayacaksınız.
+
+İsterseniz hemen test etmek için: repository'de **Actions** sekmesine girip **Supabase Uyandırma
+(Keep Alive)** görevini seçin, **Run workflow** deyip elle bir kere çalıştırabilirsiniz.
+
 ---
 
 ## Sonradan bir güncelleme geldiğinde ne yapacağız?
