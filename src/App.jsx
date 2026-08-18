@@ -429,7 +429,7 @@ function AmbarPage({ markalar, sayimlar, onSelect }) {
               <button key={m.id} onClick={() => onSelect(m.id)} className="w-full text-left px-4 py-3 hover:bg-stone-50 flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-3 flex-wrap min-w-0">
                   <span className="text-sm font-medium shrink-0">{m.marka} · {fmtTarih(m.tarih)}</span>
-                  <span className="text-xs text-stone-500 font-mono truncate">{m.urunler.map((u) => `${u.ad} ${fmt(u.yuklemeAdet)}`).join("   ")}</span>
+                  <span className="text-xs text-stone-700 font-mono font-medium truncate">{m.urunler.map((u) => `${u.ad} ${fmt(u.yuklemeAdet)}`).join("   ")}</span>
                 </div>
                 {oz ? (
                   <span className={`text-base font-mono font-semibold shrink-0 ${flagged ? "text-red-600" : "text-emerald-700"}`}>{oz.fark > 0 ? "+" : ""}{fmt(oz.fark)} kg</span>
@@ -948,7 +948,8 @@ function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGun
             <thead>
               <tr className="text-xs text-stone-500 border-b border-stone-100">
                 <th className="text-left font-normal py-2 px-3">Ürün</th>
-                {muhasebeAcik && (<><th className="text-right font-normal py-2 px-3 text-stone-400 bg-stone-50">Muhasebe Sayım Adet</th><th className="text-right font-normal py-2 px-3 text-stone-400 bg-stone-50">Muhasebe Sayım Kg</th><th className="text-right font-normal py-2 px-3 text-stone-400 bg-stone-50">Muhasebe Ort kg/adet</th></>)}
+                <th className="text-right font-normal py-2 px-3 text-emerald-700 bg-emerald-50/60">Yükleme adet</th>
+                {muhasebeAcik && (<><th className="text-right font-normal py-2 px-3 text-stone-500 bg-stone-50">Muhasebe Sayım Adet</th><th className="text-right font-normal py-2 px-3 text-stone-500 bg-stone-50">Muhasebe Sayım Kg</th><th className="text-right font-normal py-2 px-3 text-stone-500 bg-stone-50">Muhasebe Ort kg/adet</th></>)}
                 <th className="text-right font-normal py-2 px-3 text-blue-700 bg-blue-50/60">Satış adet</th>
                 <th className="text-right font-normal py-2 px-3 text-blue-700 bg-blue-50/60">Satış kg</th>
                 <th className="text-right font-normal py-2 px-3 text-amber-700 bg-amber-50/60">Kalan adet</th>
@@ -967,19 +968,20 @@ function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGun
                 const havuzKaydi = (havuz || []).filter((hv) => hv.urunId === u.id).sort((a, b) => (a.tarih === seciliSayim.tarih ? -1 : b.tarih === seciliSayim.tarih ? 1 : (a.tarih < b.tarih ? 1 : -1)))[0];
                 return (
                   <tr key={u.id} className="border-b border-stone-50 last:border-0">
-                    <td className="py-1.5 px-3 font-sans">{u.ad}</td>
+                    <td className="py-1.5 px-3 font-sans font-medium">{u.ad}</td>
+                    <td className="py-1.5 px-3 text-right bg-emerald-50/40 text-emerald-800 font-semibold">{fmt(u.yuklemeAdet)}</td>
                     {muhasebeAcik && (
                       <>
-                        <td className="py-1.5 px-3 text-right bg-stone-50/60"><input disabled={kilit} type="number" value={satir.sayimAdet} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "sayimAdet", e.target.value)} className="w-16 text-right border border-stone-200 rounded px-1.5 py-0.5 bg-white disabled:bg-stone-50 disabled:text-stone-400" /></td>
-                        <td className="py-1.5 px-3 text-right bg-stone-50/60"><input disabled={kilit} type="number" value={satir.sayimKg} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "sayimKg", e.target.value)} className="w-20 text-right border border-stone-200 rounded px-1.5 py-0.5 bg-white disabled:bg-stone-50 disabled:text-stone-400" /></td>
-                        <td className="py-1.5 px-3 text-right text-stone-400 bg-stone-50/60">{fmtKg(h.muhasebeOrtKg)}</td>
+                        <td className="py-1.5 px-3 text-right bg-stone-50/60"><input disabled={kilit} type="number" value={satir.sayimAdet} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "sayimAdet", e.target.value)} className="w-16 text-right border border-stone-200 rounded px-1.5 py-0.5 bg-white font-medium disabled:bg-stone-50 disabled:text-stone-700" /></td>
+                        <td className="py-1.5 px-3 text-right bg-stone-50/60"><input disabled={kilit} type="number" value={satir.sayimKg} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "sayimKg", e.target.value)} className="w-20 text-right border border-stone-200 rounded px-1.5 py-0.5 bg-white font-medium disabled:bg-stone-50 disabled:text-stone-700" /></td>
+                        <td className="py-1.5 px-3 text-right text-stone-600 bg-stone-50/60 font-medium">{fmtKg(h.muhasebeOrtKg)}</td>
                       </>
                     )}
                     <td className="py-1.5 px-3 text-right bg-blue-50/30">
-                      <input disabled={kilit} type="number" value={satir.satisAdet} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "satisAdet", e.target.value)} className="w-16 text-right border border-stone-200 rounded px-1.5 py-0.5 disabled:bg-stone-50 disabled:text-stone-400" />
+                      <input disabled={kilit} type="number" value={satir.satisAdet} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "satisAdet", e.target.value)} className="w-16 text-right border border-stone-200 rounded px-1.5 py-0.5 font-semibold disabled:bg-stone-50 disabled:text-stone-800" />
                     </td>
                     <td className="py-1.5 px-3 text-right bg-blue-50/30">
-                      <input disabled={kilit} type="number" value={satir.satisKg} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "satisKg", e.target.value)} className="w-20 text-right border border-stone-200 rounded px-1.5 py-0.5 disabled:bg-stone-50 disabled:text-stone-400" />
+                      <input disabled={kilit} type="number" value={satir.satisKg} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "satisKg", e.target.value)} className="w-20 text-right border border-stone-200 rounded px-1.5 py-0.5 font-semibold disabled:bg-stone-50 disabled:text-stone-800" />
                       {havuzKaydi && !kilit && (
                         <button
                           onClick={() => { satirGuncelle(seciliSayim.id, u.id, "satisAdet", String(havuzKaydi.satisAdet)); satirGuncelle(seciliSayim.id, u.id, "satisKg", String(havuzKaydi.satisKg)); }}
@@ -989,36 +991,41 @@ function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGun
                         </button>
                       )}
                     </td>
-                    <td className="py-1.5 px-3 text-right bg-amber-50/30 text-amber-800 font-medium">{h.kalanAdet}</td>
+                    <td className="py-1.5 px-3 text-right bg-amber-50/30 text-amber-900 font-semibold">{h.kalanAdet}</td>
                     <td className="py-1.5 px-3 text-right">
                       {dusukOrneklem ? (
-                        <input type="number" step="0.01" placeholder={fmtKg(h.ortKgHesap)} value={satir.ortKgManuel} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "ortKgManuel", e.target.value)} className="w-16 text-right border border-red-300 bg-red-50 rounded px-1.5 py-0.5" title="Satış adedi az, isterseniz ortalama kiloyu elle düzeltin" />
+                        <input type="number" step="0.01" placeholder={fmtKg(h.ortKgHesap)} value={satir.ortKgManuel} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "ortKgManuel", e.target.value)} className="w-16 text-right border border-red-300 bg-red-50 rounded px-1.5 py-0.5 font-medium" title="Satış adedi az, isterseniz ortalama kiloyu elle düzeltin" />
                       ) : (
-                        <span className={h.manuelVar ? "text-red-700 font-medium" : "text-stone-500"}>{fmtKg(h.ortKg)}</span>
+                        <span className={h.manuelVar ? "text-red-700 font-semibold" : "text-stone-700 font-medium"}>{fmtKg(h.ortKg)}</span>
                       )}
                     </td>
-                    <td className="py-1.5 px-3 text-right bg-stone-50">{fmt(h.satisAdet + h.kalanAdet)}</td>
-                    <td className="py-1.5 px-3 text-right bg-stone-50">{fmt(h.toplamKg)}</td>
+                    <td className="py-1.5 px-3 text-right bg-stone-50 font-semibold text-stone-800">{fmt(h.satisAdet + h.kalanAdet)}</td>
+                    <td className="py-1.5 px-3 text-right bg-stone-50 font-semibold text-stone-800">{fmt(h.toplamKg)}</td>
                   </tr>
                 );
               })}
             </tbody>
             {satirToplamlari && (
               <tfoot>
-                <tr className="border-t-2 border-stone-300 font-medium text-[13px]">
+                <tr className="border-t-2 border-stone-300 font-semibold text-[13px]">
                   <td className="py-2 px-3 font-sans">TOPLAM</td>
-                  {muhasebeAcik && (<><td className="py-2 px-3 text-right">{fmt(satirToplamlari.sayimAdet)}</td><td className="py-2 px-3 text-right">{fmt(satirToplamlari.sayimKg)}</td><td className="py-2 px-3 text-right text-stone-400">{satirToplamlari.sayimAdet > 0 ? fmtKg(satirToplamlari.sayimKg / satirToplamlari.sayimAdet) : "-"}</td></>)}
+                  <td className="py-2 px-3 text-right bg-emerald-50/60 text-emerald-800">{fmt(marka.urunler.reduce((a, u) => a + (Number(u.yuklemeAdet) || 0), 0))}</td>
+                  {muhasebeAcik && (<><td className="py-2 px-3 text-right">{fmt(satirToplamlari.sayimAdet)}</td><td className="py-2 px-3 text-right">{fmt(satirToplamlari.sayimKg)}</td><td className="py-2 px-3 text-right text-stone-500">{satirToplamlari.sayimAdet > 0 ? fmtKg(satirToplamlari.sayimKg / satirToplamlari.sayimAdet) : "-"}</td></>)}
                   <td className="py-2 px-3 text-right">{fmt(satirToplamlari.satisAdet)}</td>
                   <td className="py-2 px-3 text-right">{fmt(satirToplamlari.satisKg)}</td>
                   <td className="py-2 px-3 text-right">{fmt(satirToplamlari.kalanAdet)}</td>
-                  <td className="py-2 px-3 text-right text-stone-400">{satirToplamlari.kalanAdet > 0 ? fmtKg(satirToplamlari.kalanKg / satirToplamlari.kalanAdet) : "-"}</td>
+                  <td className="py-2 px-3 text-right text-stone-500">{satirToplamlari.kalanAdet > 0 ? fmtKg(satirToplamlari.kalanKg / satirToplamlari.kalanAdet) : "-"}</td>
                   <td className="py-2 px-3 text-right bg-stone-100">{fmt(satirToplamlari.satisAdet + satirToplamlari.kalanAdet)}</td>
                   <td className="py-2 px-3 text-right bg-stone-100">{fmt(satirToplamlari.toplamKg)}</td>
                 </tr>
               </tfoot>
             )}
           </table>
-          <div className="px-4 py-2 text-xs text-stone-400 border-t border-stone-100">Kalan adet (turuncu sütun) sadece "Dükkanda Kalan" sayfasından girilir, burada salt görüntülenir. Satış adedi 50'nin altındaysa ortalama kg elle düzeltilebilir (kırmızı kutu).</div>
+          <div className="px-4 py-2.5 border-t border-stone-200 bg-emerald-50/50 flex items-center justify-between">
+            <span className="text-sm font-medium text-emerald-800">Toplam Yükleme Kg</span>
+            <span className="text-base font-mono font-bold text-emerald-800">{fmt(marka.toplamYuklemeKg)} kg</span>
+          </div>
+          <div className="px-4 py-2 text-xs text-stone-500 border-t border-stone-100">Kalan adet (turuncu sütun) sadece "Dükkanda Kalan" sayfasından girilir, burada salt görüntülenir. Satış adedi 50'nin altındaysa ortalama kg elle düzeltilebilir (kırmızı kutu).</div>
           {seciliSayim.degisiklikGecmisi?.length > 0 && <DegisiklikGecmisi kayitlar={seciliSayim.degisiklikGecmisi} />}
         </div>
       )}
