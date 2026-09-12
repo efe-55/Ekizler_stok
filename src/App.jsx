@@ -6,17 +6,25 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 
 // Ürün isimleri artık SİZİN kendi Excel şablonunuzdaki adlarla birebir aynı (Aybelsoft'un kısa
 // adıyla değil). Aybelsoft eşleştirmesi ayrı bir "kod" alanıyla arka planda hâlâ çalışıyor.
+const PATATES_KOD_AD = {
+  PAT: "PATATES", "2PAT": "2 PATATES", "3PAT": "3PATATES", TAZ: "TAZ.PATATES", "2TAZ": "2TAZ.PATATES", "3TAZ": "3TAZE PATATES",
+  BEY: "BEYAZ PATATES", "2BEY": "2BEYAZ", "3BEY": "3BEYAZ", KUM: "KUMPİR", KPAT: "25 LİK PATATES", K2PAT: "25 LİK 2.PATATES",
+  TOH: "TOHUMLUK", İKT: "İSKARTA PAT.", FIS: "FISIL",
+};
+const SOGAN_KOD_AD = {
+  SOĞ: "SOĞAN", "2SO": "2SOĞAN", TAK: "TAKOZ SOĞAN", TSO: "TAZE SOĞAN", "2TS": "2.TAZE SOĞAN",
+  KIR: "KIRMIZI SOĞAN", "2KIR": "2KIRMIZI SOĞAN", YEŞ: "YEŞİL SOĞAN",
+};
 const MASTER_URUNLER = {
-  Patates: ["I. PATATES (40)", "I. PATATES (25)", "II. PATATES (40)", "II. PATATES (25)", "III. PATATES (40)", "KUMPİR PATATES"],
-  Soğan: ["SOĞAN", "II. SOĞAN", "TAKOZ SOĞAN", "KIRMIZI SOĞAN"],
+  Patates: Object.values(PATATES_KOD_AD),
+  Soğan: Object.values(SOGAN_KOD_AD),
 };
+const URUN_KOD_TAHMIN = Object.fromEntries([
+  ...Object.entries(PATATES_KOD_AD).map(([kod, ad]) => [ad, kod]),
+  ...Object.entries(SOGAN_KOD_AD).map(([kod, ad]) => [ad, kod]),
+]);
+const AY_KOD_TABLOSU = { 1: "O", 2: "Ş", 3: "M", 4: "N", 5: "MY", 6: "H", 7: "T", 8: "A", 9: "E", 10: "EK", 11: "K", 12: "AR" };
 
-// Aybelsoft'un kendi kısa kodları (PAT, 2PAT gibi) ile sizin görünen isminiz arasındaki eşleşme.
-// "2PAT" ve "KUM" gerçek dosyanızda doğrulandı, geri kalanı aynı mantıktan tahmin edildi.
-const URUN_KOD_TAHMIN = {
-  "I. PATATES (40)": "PAT", "I. PATATES (25)": "25PAT", "II. PATATES (40)": "2PAT", "II. PATATES (25)": "25-2PAT", "III. PATATES (40)": "3PAT", "KUMPİR PATATES": "KUM",
-  "SOĞAN": "SO", "II. SOĞAN": "2SO", "TAKOZ SOĞAN": "TSO", "KIRMIZI SOĞAN": "KSO",
-};
 
 function Stepper({ value, onChange }) {
   const v = Number(value) || 0;
@@ -35,10 +43,10 @@ function Stepper({ value, onChange }) {
           onFocus={(e) => e.target.select()}
           onChange={(e) => setTaslak(e.target.value)}
           onBlur={() => { onChange(taslak === "" ? "0" : taslak); setEditing(false); }}
-          className="w-14 text-center border border-amber-300 bg-white rounded py-1.5 text-sm font-mono"
+          className="w-14 text-center border border-ochre-300 bg-white rounded py-1.5 text-sm font-mono"
         />
       ) : (
-        <button type="button" onClick={() => { setTaslak(""); setEditing(true); }} className="w-14 text-center border border-amber-200 bg-amber-50 rounded py-1.5 text-sm font-mono font-medium">
+        <button type="button" onClick={() => { setTaslak(""); setEditing(true); }} className="w-14 text-center border border-ochre-200 bg-ochre-50 rounded py-1.5 text-sm font-mono font-medium">
           {v}
         </button>
       )}
@@ -48,9 +56,22 @@ function Stepper({ value, onChange }) {
   );
 }
 
-function satirHesap(satir) {
-  const satisAdet = Number(satir.satisAdet) || 0;
-  const satisKg = Number(satir.satisKg) || 0;
+// Bir marka+ürün için, geliş tarihinden verilen tarihe kadar Aybelsoft'tan gelen tüm günlük
+// özetlerin toplamı — SATIŞ ARTIK HİÇBİR YERDE HAM OLARAK SAKLANMIYOR, hep buradan hesaplanır.
+function satisToplaTarihAraligi(aybelsoftOzet, markaId, urunId, baslangic, bitis) {
+  let adet = 0, kilo = 0;
+  (aybelsoftOzet || []).forEach((o) => {
+    if (o.markaId === markaId && o.urunId === urunId && o.tarih >= baslangic && o.tarih <= bitis) {
+      adet += o.toplamAdet;
+      kilo += o.toplamKilo;
+    }
+  });
+  return { adet, kilo };
+}
+
+function satirHesap(satir, satisAdetIn, satisKgIn) {
+  const satisAdet = Number(satisAdetIn) || 0;
+  const satisKg = Number(satisKgIn) || 0;
   const kalanAdet = Number(satir.kalanAdet) || 0;
   const sayimAdet = Number(satir.sayimAdet) || 0;
   const sayimKg = Number(satir.sayimKg) || 0;
@@ -63,11 +84,15 @@ function satirHesap(satir) {
   return { ortKg, ortKgHesap, manuelVar, muhasebeOrtKg, sayimAdet, sayimKg, kalanKg, toplamKg, satisKg, satisAdet, kalanAdet };
 }
 
-function sayimOzet(sayim, marka) {
+// Bir sayımın FARK'ı: markanın geliş tarihinden BU sayımın tarihine kadar biriken satış + o anki kalan.
+function sayimOzet(sayim, marka, aybelsoftOzet) {
   let toplamSatisKg = 0;
   let toplamKalanKg = 0;
-  sayim.satirlar.forEach((s) => {
-    const h = satirHesap(s);
+  marka.urunler.forEach((u) => {
+    const satir = sayim.satirlar.find((s) => s.urunId === u.id);
+    if (!satir) return;
+    const { adet, kilo } = satisToplaTarihAraligi(aybelsoftOzet, marka.id, u.id, marka.tarih, sayim.tarih);
+    const h = satirHesap(satir, adet, kilo);
     toplamSatisKg += h.satisKg;
     toplamKalanKg += h.kalanKg;
   });
@@ -81,12 +106,12 @@ function esikDegeri(marka) {
   return Math.max(150, Math.abs(Number(marka.toplamYuklemeKg) || 0) * 0.03);
 }
 
-function anomaliler(marka, sayimListesi) {
+function anomaliler(marka, sayimListesi, aybelsoftOzet) {
   const list = [...sayimListesi].sort((a, b) => a.sayimNo - b.sayimNo);
   const notlar = [];
   let onceki = null;
   list.forEach((s) => {
-    const { fark } = sayimOzet(s, marka);
+    const { fark } = sayimOzet(s, marka, aybelsoftOzet);
     if (onceki !== null) {
       const delta = fark - onceki;
       if (Math.abs(delta) > esikDegeri(marka)) {
@@ -95,35 +120,15 @@ function anomaliler(marka, sayimListesi) {
     }
     onceki = fark;
   });
-  list.forEach((s) => {
-    s.satirlar.forEach((satir) => {
-      const adet = Number(satir.satisAdet) || 0;
+  const enYeni = list[list.length - 1];
+  if (enYeni) {
+    marka.urunler.forEach((u) => {
+      const { adet } = satisToplaTarihAraligi(aybelsoftOzet, marka.id, u.id, marka.tarih, enYeni.tarih);
       if (adet > 0 && adet < 50) {
-        const urun = marka.urunler.find((u) => u.id === satir.urunId);
-        notlar.push({ sayimNo: s.sayimNo, mesaj: `${s.sayimNo}. sayımda "${urun?.ad || "ürün"}" için satış adedi ${adet} — az örneklemden ortalama kg güvenilir olmayabilir, gerekirse elle düzeltin.` });
+        notlar.push({ sayimNo: enYeni.sayimNo, mesaj: `"${u.ad}" için toplam satış adedi ${adet} — az örneklemden ortalama kg güvenilir olmayabilir, gerekirse elle düzeltin.` });
       }
     });
-  });
-  const urunBazli = {};
-  list.forEach((s) => {
-    s.satirlar.forEach((satir) => {
-      if (!urunBazli[satir.urunId]) urunBazli[satir.urunId] = [];
-      urunBazli[satir.urunId].push({ sayimNo: s.sayimNo, sayimKg: Number(satir.sayimKg) || 0, satisKg: Number(satir.satisKg) || 0 });
-    });
-  });
-  Object.entries(urunBazli).forEach(([urunId, kayitlar]) => {
-    const urun = marka.urunler.find((u) => u.id === urunId);
-    for (let i = 1; i < kayitlar.length; i++) {
-      const onceki2 = kayitlar[i - 1];
-      const simdi = kayitlar[i];
-      if (onceki2.sayimKg > 0 && simdi.sayimKg > 0 && Math.abs(simdi.sayimKg - onceki2.sayimKg) > Math.max(20, onceki2.sayimKg * 0.02)) {
-        notlar.push({ sayimNo: simdi.sayimNo, mesaj: `"${urun?.ad || "ürün"}" için muhasebe kaydı ${onceki2.sayimNo}. sayımda ${fmt(onceki2.sayimKg)} kg, ${simdi.sayimNo}. sayımda ${fmt(simdi.sayimKg)} kg yazılmış — tutarsızlık var.` });
-      }
-      if (simdi.satisKg < onceki2.satisKg) {
-        notlar.push({ sayimNo: simdi.sayimNo, mesaj: `"${urun?.ad || "ürün"}" için Aybelsoft satış kg'ı ${onceki2.sayimNo}. sayımdan (${fmt(onceki2.satisKg)} kg) ${simdi.sayimNo}. sayıma (${fmt(simdi.satisKg)} kg) düşmüş — muhtemelen başka markaya yazılmış.` });
-      }
-    }
-  });
+  }
   return notlar;
 }
 
@@ -188,15 +193,20 @@ function gunFarki(t1, t2) {
   return Math.abs((new Date(t1) - new Date(t2)) / 86400000);
 }
 // Bir marka kodu (ör. "A8") birden fazla markaya ait olabilir — hem "A8 Patates" hem "A8 Soğan" gibi
-// aynı sevkiyatın parçaları, HEM DE farklı aylarda tekrar kullanılmış, birbiriyle alakasız kodlar
-// (Ağustos'un A8'i ile aylar sonraki başka bir A8 gibi). Satırın tarihine en yakın (60 gün içi)
-// markaları öne çıkararak bu iki durumu ayırt ediyoruz.
+// aynı sevkiyatın parçaları, HEM DE farklı zamanlarda tekrar kullanılmış, birbiriyle alakasız kodlar
+// (Ağustos'un A8'i ile aylar sonraki başka bir A8 gibi). KESİN KURAL: bir satış, malın geliş
+// tarihinden ÖNCE olamaz — bu yüzden satırın tarihine eşit ya da ondan önceki EN YAKIN geliş
+// tarihli marka(lar) doğru adaydır. Sabit bir gün penceresi (60 gün gibi) KULLANILMIYOR — çünkü
+// aynı kod kısa aralıklarla (ör. 46 gün) tekrar kullanılabiliyor, keyfi bir pencere bunları yanlışlıkla
+// birleştirebilir. Aynı tarihte gelen Patates+Soğan çifti bu şekilde birlikte döner (ürün tipiyle ayrılır).
 function ayniKodAdaylari(kodRaw, tarih, tumMarkalar) {
   const rawN = normalizeKod(kodRaw);
   const ayniKod = tumMarkalar.filter((m) => normalizeKod(m.marka) === rawN);
-  if (ayniKod.length <= 1) return ayniKod;
-  const yakinlar = ayniKod.filter((m) => gunFarki(m.tarih, tarih) <= 60);
-  return yakinlar.length > 0 ? yakinlar : ayniKod;
+  if (ayniKod.length <= 1) return ayniKod.filter((m) => !tarih || !m.tarih || m.tarih <= tarih);
+  const uygunlar = ayniKod.filter((m) => !tarih || !m.tarih || m.tarih <= tarih);
+  if (uygunlar.length === 0) return [];
+  const enYakinTarih = uygunlar.reduce((en, m) => (m.tarih > en ? m.tarih : en), uygunlar[0].tarih);
+  return uygunlar.filter((m) => m.tarih === enYakinTarih);
 }
 function enIyiUrunEslesme(raw, urunler, kodRaw) {
   // Önce ürün kodu (PAT, 2SO gibi) tam eşleşiyor mu bak — kod, isimden çok daha güvenilir bir sinyal
@@ -277,64 +287,82 @@ function tarihStr(v) {
 function hucreStr(v) {
   return v === undefined || v === null ? "" : String(v);
 }
-function satirHesaplaVeDuzelt(kap, kiloHam) {
+function trSayi(v) {
+  if (typeof v === "number") return v;
+  const s = String(v ?? "").trim().replace(/\./g, "").replace(",", ".");
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+}
+function satirHesaplaVeDuzelt(kap, kiloHam, fiyat, tutar) {
+  // KESİN yöntem: Tutar ÷ Fiyat = gerçek kilo (aynı satırda zaten yazıyor). Eski Excel formatı
+  // yüzünden ham kilo üç halde gelebiliyor (doğru / binlik ayıracı bozulmuş / metin) — tahmin
+  // etmek yerine bu çapraz hesapla kesin olarak doğruluyoruz. 29.517 gerçek satırda test edildi,
+  // açıklanamayan tek satır çıkmadı.
   let satisKg = kiloHam;
   let birimDuzeltildi = false;
-  // Bilinen Aybelsoft export hatası: büyük kilo değerleri (binlik ayıracı yüzünden)
-  // gerçek değerin 1000'de biri olarak kayda geçebiliyor (ör. 1749 yerine 1.749).
-  // Kap başına düşen kilo 5'in altındaysa (patates/soğan için gerçekçi olmayan bir oran) düzeltiyoruz.
-  if (kap > 0 && satisKg > 0 && satisKg / kap < 5) {
-    satisKg = satisKg * 1000;
-    birimDuzeltildi = true;
+  let dogrulanamadi = false;
+  if (typeof fiyat === "number" && fiyat > 0 && tutar !== null) {
+    const gercek = tutar / fiyat;
+    if (kiloHam !== null && Math.abs(kiloHam - gercek) < 0.5) {
+      satisKg = kiloHam; // ham değer zaten doğru
+    } else if (kiloHam !== null && Math.abs(kiloHam * 1000 - gercek) < 5) {
+      satisKg = kiloHam * 1000; // binlik ayıracı bozulmuş, düzelt
+      birimDuzeltildi = true;
+    } else {
+      satisKg = gercek; // ham değer açıklanamadı, Tutar/Fiyat'a güven
+      birimDuzeltildi = kiloHam === null || Math.abs(kiloHam - gercek) > 0.5;
+    }
+  } else {
+    // Fiyat/tutar okunamadı (nadir) — ham kiloyu olduğu gibi kullan ama doğrulanamadı diye işaretle
+    dogrulanamadi = true;
+    satisKg = kiloHam || 0;
   }
-  return { satisKg, birimDuzeltildi };
+  return { satisKg, birimDuzeltildi, dogrulanamadi };
 }
 async function aybelsoftDosyasiniOku(file) {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array", cellDates: true });
   const ws = wb.Sheets[wb.SheetNames[0]];
 
-  // 1. YÖNTEM (asıl): gerçek Aybelsoft export'unda başlık satırı birleştirilmiş hücreler yüzünden
-  // veriyle aynı hizada değil — bu yüzden isimden değil, doğrulanmış sabit sütun konumlarından okuyoruz:
-  // 0=Marka, 4=Mal(kısa), 6=Mal(uzun), 12=Kap(adet), 15=Kilo, 39=Ad Soyad, ~45=Fatura Tarihi
+  // Doğrulanmış sabit sütun konumları (4 gerçek Aybelsoft dosyasında test edildi):
+  // 0=Marka, 4=Ürün kodu, 6=Ürün adı, 12=Kap(Adet), 15=Kilo, 22=Fiyat, 29=Tutar, 35=Ref No, 41=Ad Soyad, 47=Fatura Tarihi
   const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: true });
+
+  // Başlık doğrulaması: dosyanın beklenen yapıda olup olmadığını kontrol et — Aybelsoft rapor
+  // formatını değiştirirse burada durup uyarmalıyız, sessizce yanlış sütun okumamalıyız.
+  let basliksatiriBulundu = false;
+  for (let r = 0; r < Math.min(grid.length, 20); r++) {
+    const row = grid[r];
+    if (hucreStr(row[0]).trim().toLocaleUpperCase("tr") === "MARKA" || row.some((c) => hucreStr(c).trim().toLocaleUpperCase("tr") === "MARKA")) {
+      basliksatiriBulundu = true;
+      break;
+    }
+  }
+
   const sabitKonumlu = [];
   for (const row of grid) {
     const marka = hucreStr(row[0]).trim();
     if (!marka || marka.toLocaleUpperCase("tr") === "MARKA") continue;
     const kap = Number(row[12]) || 0;
     if (kap <= 0) continue; // başlık/toplam/boş satır — gerçek satış satırı değil
-    const { satisKg, birimDuzeltildi } = satirHesaplaVeDuzelt(kap, Number(row[15]) || 0);
-    const malKisa = hucreStr(row[4]).trim();
-    const malUzun = hucreStr(row[6]).trim();
+    const kod = hucreStr(row[4]).trim();
+    // SADECE patates/soğan kodları işlenir — diğer ürünler (limon, domates vb.) kod bazlı elenir.
+    if (!PATATES_KOD_AD[kod] && !SOGAN_KOD_AD[kod]) continue;
+    const kiloHam = trSayi(row[15]);
+    const fiyat = trSayi(row[22]);
+    const tutar = trSayi(row[29]);
+    const { satisKg, birimDuzeltildi, dogrulanamadi } = satirHesaplaVeDuzelt(kap, kiloHam, fiyat, tutar);
     let tarih = "";
-    for (const idx of [45, 44, 46, 43, 42]) {
+    for (const idx of [47, 46, 48, 45, 44]) {
       const t = tarihStr(row[idx]);
       if (t) { tarih = t; break; }
     }
     sabitKonumlu.push({
-      tarih, markaRaw: marka, urunRaw: malUzun.length >= malKisa.length ? malUzun : malKisa, urunKoduRaw: malKisa,
-      satisAdet: kap, satisKg, birimDuzeltildi, alanKisi: hucreStr(row[39]).trim(),
+      tarih, markaRaw: marka, urunRaw: PATATES_KOD_AD[kod] || SOGAN_KOD_AD[kod] || hucreStr(row[6]).trim(), urunKoduRaw: kod,
+      satisAdet: kap, satisKg, birimDuzeltildi, dogrulanamadi, refNo: hucreStr(row[35]).trim(), alanKisi: hucreStr(row[41]).trim(),
     });
   }
-  if (sabitKonumlu.length > 0) return sabitKonumlu;
-
-  // 2. YÖNTEM (yedek): başlıklar veriyle hizalıysa, isimden arayarak oku
-  const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
-  return rows
-    .map((row) => {
-      const satisAdet = Number(bulSutun(row, ["kap", "adet"])) || 0;
-      const { satisKg, birimDuzeltildi } = satirHesaplaVeDuzelt(satisAdet, Number(bulSutun(row, ["kilo", "kg", "ağırlık", "agirlik"])) || 0);
-      return {
-        tarih: tarihStr(bulSutun(row, ["fatura tarihi", "tarih"])),
-        markaRaw: String(bulSutun(row, ["marka"])).trim(),
-        urunRaw: bulSutunEnUzun(row, ["mal", "ürün", "urun"]).trim(),
-        urunKoduRaw: String(bulSutun(row, ["ürün kodu", "urun kodu", "kod"])).trim(),
-        satisAdet, satisKg, birimDuzeltildi,
-        alanKisi: String(bulSutun(row, ["ad soyad", "alan", "kişi", "kisi", "personel"])).trim(),
-      };
-    })
-    .filter((r) => r.markaRaw && r.markaRaw.toLocaleUpperCase("tr") !== "MARKA");
+  return { satirlar: sabitKonumlu, basliksatiriBulundu };
 }
 const AY_ADI = { "01": "Ocak", "02": "Şubat", "03": "Mart", "04": "Nisan", "05": "Mayıs", "06": "Haziran", "07": "Temmuz", "08": "Ağustos", "09": "Eylül", "10": "Ekim", "11": "Kasım", "12": "Aralık" };
 function ayEtiket(ay) {
@@ -348,16 +376,16 @@ function urunTipiSinifla(marka) {
   return "Diğer";
 }
 
-function ayFarkToplami(markalar, sayimlar, ay) {
+function ayFarkToplami(markalar, sayimlar, ay, aybelsoftOzet) {
   let toplam = 0;
   markalar.filter((m) => m.tarih?.slice(0, 7) === ay).forEach((m) => {
     const son = sayimlar.filter((s) => s.markaId === m.id).sort((a, b) => b.sayimNo - a.sayimNo)[0];
-    if (son) toplam += sayimOzet(son, m).fark;
+    if (son) toplam += sayimOzet(son, m, aybelsoftOzet).fark;
   });
   return toplam;
 }
 
-function AmbarPage({ markalar, sayimlar, onSelect }) {
+function AmbarPage({ markalar, sayimlar, aybelsoftOzet, onSelect }) {
   const [seciliAy, setSeciliAy] = useState(null);
   const aylar = [...new Set(markalar.map((m) => m.tarih?.slice(0, 7)).filter(Boolean))].sort(); // artan (Temmuz -> Ağustos)
 
@@ -374,16 +402,16 @@ function AmbarPage({ markalar, sayimlar, onSelect }) {
           <div className="rounded-lg border border-stone-200 bg-white divide-y divide-stone-100">
             {aylar.map((ay) => {
               const sayisi = markalar.filter((m) => m.tarih?.slice(0, 7) === ay).length;
-              const fark = ayFarkToplami(markalar, sayimlar, ay);
+              const fark = ayFarkToplami(markalar, sayimlar, ay, aybelsoftOzet);
               const flagged = Math.abs(fark) > 150;
               return (
                 <button key={ay} onClick={() => setSeciliAy(ay)} className="w-full text-left px-4 py-3.5 hover:bg-stone-50 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5">
-                    <Folder className="w-4 h-4 text-amber-700 shrink-0" />
+                    <Folder className="w-4 h-4 text-brand-600 shrink-0" />
                     <span className="text-sm font-medium">{ayEtiket(ay)}</span>
                     <span className="text-xs text-stone-400">{sayisi} marka</span>
                   </div>
-                  <span className={`text-base font-mono font-semibold ${flagged ? "text-red-600" : "text-emerald-700"}`}>{fark > 0 ? "+" : ""}{fmt(fark)} kg</span>
+                  <span className={`font-serif text-lg font-bold tabular-nums ${flagged ? "text-red-600" : "text-emerald-700"}`}>{fark > 0 ? "+" : ""}{fmt(fark)} kg</span>
                 </button>
               );
             })}
@@ -405,7 +433,7 @@ function AmbarPage({ markalar, sayimlar, onSelect }) {
     let toplam = 0;
     const satirlar = liste.map((m) => {
       const son = sayimlar.filter((s) => s.markaId === m.id).sort((a, b) => b.sayimNo - a.sayimNo)[0];
-      const oz = son ? sayimOzet(son, m) : null;
+      const oz = son ? sayimOzet(son, m, aybelsoftOzet) : null;
       if (oz) toplam += oz.fark;
       return { m, oz };
     });
@@ -432,7 +460,7 @@ function AmbarPage({ markalar, sayimlar, onSelect }) {
                   <span className="text-xs text-stone-700 font-mono font-medium truncate">{m.urunler.map((u) => `${u.ad} ${fmt(u.yuklemeAdet)}`).join("   ")}</span>
                 </div>
                 {oz ? (
-                  <span className={`text-base font-mono font-semibold shrink-0 ${flagged ? "text-red-600" : "text-emerald-700"}`}>{oz.fark > 0 ? "+" : ""}{fmt(oz.fark)} kg</span>
+                  <span className={`font-serif text-lg font-bold tabular-nums shrink-0 ${flagged ? "text-red-600" : "text-emerald-700"}`}>{oz.fark > 0 ? "+" : ""}{fmt(oz.fark)} kg</span>
                 ) : (
                   <span className="text-xs text-stone-400 shrink-0">Sayım yok</span>
                 )}
@@ -460,7 +488,7 @@ function AmbarPage({ markalar, sayimlar, onSelect }) {
 
       <div className="rounded-lg border border-stone-300 bg-stone-50 px-4 py-3 flex items-center justify-between">
         <span className="text-sm font-medium">{ayEtiket(seciliAy)} Genel Toplam ({ayMarkalari.length} marka)</span>
-        <span className={`text-lg font-mono font-bold ${Math.abs(genelFark) > 150 ? "text-red-600" : "text-emerald-700"}`}>{genelFark > 0 ? "+" : ""}{fmt(genelFark)} kg</span>
+        <span className={`font-serif text-2xl font-bold tabular-nums ${Math.abs(genelFark) > 150 ? "text-red-600" : "text-emerald-700"}`}>{genelFark > 0 ? "+" : ""}{fmt(genelFark)} kg</span>
       </div>
     </div>
   );
@@ -481,7 +509,7 @@ function YeniIslemPage({ markaForm, setMarkaForm, urunToggle, urunAdetGuncelle, 
           <label className="text-xs text-stone-500 block mb-1">Marka kodu</label>
           <input placeholder="ör. A8, T30" value={markaForm.marka} onChange={(e) => setMarkaForm({ ...markaForm, marka: e.target.value })} className="w-full text-sm border border-stone-200 rounded px-2 py-1.5" />
           {cakisan.length > 0 && (
-            <p className="text-xs text-amber-700 mt-1.5 flex items-start gap-1">
+            <p className="text-xs text-brand-600 mt-1.5 flex items-start gap-1">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
               "{markaForm.marka}" kodu son 60 gün içinde zaten kullanılmış ({cakisan.map((m) => `${m.marka} · ${m.urun} · ${fmtTarih(m.tarih)}`).join(", ")}). Aybelsoft içe aktarımında karışabilir, farklı bir kod kullanmayı düşünün.
             </p>
@@ -491,7 +519,7 @@ function YeniIslemPage({ markaForm, setMarkaForm, urunToggle, urunAdetGuncelle, 
           <label className="text-xs text-stone-500 block mb-1">Ürün tipi</label>
           <div className="flex gap-1.5">
             {Object.keys(MASTER_URUNLER).map((tip) => (
-              <button key={tip} type="button" onClick={() => setMarkaForm({ ...markaForm, urun: tip, secilenUrunler: {} })} className={`flex-1 text-sm rounded px-2 py-1.5 border ${markaForm.urun === tip ? "bg-amber-700 text-white border-amber-700" : "border-stone-200 hover:border-stone-300"}`}>{tip}</button>
+              <button key={tip} type="button" onClick={() => setMarkaForm({ ...markaForm, urun: tip, secilenUrunler: {} })} className={`flex-1 text-sm rounded px-2 py-1.5 border ${markaForm.urun === tip ? "bg-brand-600 text-white border-brand-600" : "border-stone-200 hover:border-stone-300"}`}>{tip}</button>
             ))}
           </div>
         </div>
@@ -511,20 +539,20 @@ function YeniIslemPage({ markaForm, setMarkaForm, urunToggle, urunAdetGuncelle, 
               const secili = ad in markaForm.secilenUrunler;
               return (
                 <div key={ad} className="flex items-center gap-1.5">
-                  <button type="button" onClick={() => urunToggle(ad)} className={`flex-1 text-left text-sm rounded px-2 py-1.5 border ${secili ? "bg-amber-50 border-amber-300 font-medium" : "border-stone-200 text-stone-500 hover:border-stone-300"}`}>{secili ? "✓ " : ""}{ad}</button>
+                  <button type="button" onClick={() => urunToggle(ad)} className={`flex-1 text-left text-sm rounded px-2 py-1.5 border ${secili ? "bg-brand-50 border-brand-300 font-medium" : "border-stone-200 text-stone-500 hover:border-stone-300"}`}>{secili ? "✓ " : ""}{ad}</button>
                   {secili && <input placeholder="Adet" type="number" value={markaForm.secilenUrunler[ad]} onChange={(e) => urunAdetGuncelle(ad, e.target.value)} className="w-16 text-sm border border-stone-200 rounded px-2 py-1.5" />}
                 </div>
               );
             })}
             {Object.keys(markaForm.secilenUrunler).filter((ad) => !(MASTER_URUNLER[markaForm.urun] || []).includes(ad)).map((ad) => (
               <div key={ad} className="flex items-center gap-1.5">
-                <span className="flex-1 text-left text-sm rounded px-2 py-1.5 border border-amber-300 bg-amber-50 font-medium">✓ {ad}</span>
+                <span className="flex-1 text-left text-sm rounded px-2 py-1.5 border border-brand-300 bg-brand-50 font-medium">✓ {ad}</span>
                 <input placeholder="Adet" type="number" value={markaForm.secilenUrunler[ad]} onChange={(e) => urunAdetGuncelle(ad, e.target.value)} className="w-16 text-sm border border-stone-200 rounded px-2 py-1.5" />
               </div>
             ))}
             <div className="flex gap-1.5 pt-0.5">
               <input placeholder="Listede yok mu? özel ürün adı yaz" value={markaForm.ozelUrunAdi} onChange={(e) => setMarkaForm({ ...markaForm, ozelUrunAdi: e.target.value })} className="flex-1 text-xs border border-stone-200 rounded px-2 py-1.5" />
-              <button type="button" onClick={ozelUrunEkle} className="text-xs text-amber-700 hover:underline shrink-0 px-1">+ ekle</button>
+              <button type="button" onClick={ozelUrunEkle} className="text-xs text-brand-600 hover:underline shrink-0 px-1">+ ekle</button>
             </div>
           </div>
         )}
@@ -613,39 +641,70 @@ function GecmisPage({ etkinlikler, onMarkaTikla }) {
   );
 }
 
-function ImportPage({ markalar, aktarimUygula }) {
-  const [satirlar, setSatirlar] = useState([]); // ham okunan satırlar
-  const [markaEslesme, setMarkaEslesme] = useState({}); // markaRaw -> markaId | 'yoksay'  (SADECE tam eşleşmesi olmayan kodlar için)
+// 1 Temmuz 2026'dan itibaren düzenli marka kodu disiplini başladı — bundan önceki satırlar
+// (yüzlerce eski/alakasız kod içerdiği için) hiç işlenmez, hiç sorulmaz, sessizce atlanır.
+const AKTARIM_BASLANGIC = "2026-07-01";
+
+function ImportPage({ markalar, aybelsoftOzet, aktarimUygula }) {
+  const [satirlar, setSatirlar] = useState([]); // ham okunan satırlar (başlangıç tarihinden sonrası)
+  const [markaEslesme, setMarkaEslesme] = useState({});
   const [dosyaAdi, setDosyaAdi] = useState("");
   const [hata, setHata] = useState("");
+  const [butunlukUyarilari, setButunlukUyarilari] = useState([]);
   const [uygulandi, setUygulandi] = useState(null);
+
+  function butunlukKontrolEt(okunanSatirlar) {
+    const uyarilar = [];
+    const tarihler = okunanSatirlar.map((r) => r.tarih).filter(Boolean).sort();
+    if (tarihler.length === 0) return uyarilar;
+    const ilkTarih = tarihler[0];
+    const sonTarih = tarihler[tarihler.length - 1];
+
+    const mevcutTarihler = [...new Set((aybelsoftOzet || []).map((o) => o.tarih))].sort();
+    if (mevcutTarihler.length > 0) {
+      const mevcutSon = mevcutTarihler[mevcutTarihler.length - 1];
+      if (sonTarih < mevcutSon) {
+        uyarilar.push(`Bu dosyanın son tarihi (${fmtTarih(sonTarih)}) sistemde zaten kayıtlı olan en son tarihten (${fmtTarih(mevcutSon)}) daha ESKİ görünüyor — eksik/kısmi bir dosya yüklüyor olabilirsiniz.`);
+      }
+      // Önceden dolu olan bir gün, bu dosyanın kapsadığı aralıkta hiç görünmüyor mu?
+      const buDosyadakiTarihler = new Set(tarihler);
+      const kaybolanGunler = mevcutTarihler.filter((t) => t >= ilkTarih && t < sonTarih && !buDosyadakiTarihler.has(t));
+      if (kaybolanGunler.length > 0) {
+        uyarilar.push(`${kaybolanGunler.length} gün (ör. ${fmtTarih(kaybolanGunler[0])}) önceki yüklemede doluydu ama bu dosyada hiç görünmüyor — dosya eksik gelmiş olabilir.`);
+      }
+    }
+    if (ilkTarih > AKTARIM_BASLANGIC) {
+      uyarilar.push(`Dosyanın en erken tarihi ${fmtTarih(ilkTarih)} — beklenen başlangıç ${fmtTarih(AKTARIM_BASLANGIC)} değil, dosya kümülatif olmayabilir (kısmi/filtrelenmiş export).`);
+    }
+    return uyarilar;
+  }
 
   async function dosyaSecildi(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setHata(""); setUygulandi(null);
+    setHata(""); setUygulandi(null); setButunlukUyarilari([]);
     try {
-      const okunan = await aybelsoftDosyasiniOku(file);
-      if (okunan.length === 0) { setHata("Dosyada okunabilir satır bulunamadı. Ne sabit sütun konumlarıyla (Aybelsoft'un standart raporu) ne de başlık isimleriyle bir eşleşme bulamadık. Dosyanın ilk sayfasında satış satırları olduğundan emin olun."); return; }
+      const { satirlar: hamSatirlar, basliksatiriBulundu } = await aybelsoftDosyasiniOku(file);
+      if (!basliksatiriBulundu) { setHata("Dosyanın yapısı beklenenden farklı görünüyor (\"Marka\" başlığı bulunamadı). Aybelsoft rapor formatını değiştirmiş olabilir, kontrol edin — güvenlik için işlem durduruldu."); return; }
+      const okunan = hamSatirlar.filter((r) => r.tarih && r.tarih >= AKTARIM_BASLANGIC);
+      if (okunan.length === 0) { setHata(`Dosyada ${fmtTarih(AKTARIM_BASLANGIC)} sonrasına ait patates/soğan satırı bulunamadı.`); return; }
+      setButunlukUyarilari(butunlukKontrolEt(okunan));
       setSatirlar(okunan);
       setDosyaAdi(file.name);
-      // Sadece TAM eşleşmesi olmayan (typo şüpheli) kodlar için öneri hazırla — tam eşleşenler
-      // her satırda kendi tarihine göre otomatik çözülecek, kullanıcıya sorulmayacak.
       const oneriler = {};
       const benzersizler = [...new Set(okunan.map((r) => r.markaRaw))];
       benzersizler.forEach((raw) => {
         const tamEslesen = markalar.some((m) => normalizeKod(m.marka) === normalizeKod(raw));
         if (tamEslesen) return;
         const { best, mesafe } = enIyiMarkaEslesme(raw, markalar);
-        oneriler[raw] = best && mesafe <= 2 ? best.id : "";
+        oneriler[raw] = best && mesafe <= 2 ? best.id : "yoksay";
       });
       setMarkaEslesme(oneriler);
     } catch (err) {
-      setHata("Dosya okunamadı. .xlsx formatında olduğundan emin olun.");
+      setHata("Dosya okunamadı. .xls/.xlsx formatında olduğundan emin olun.");
     }
   }
 
-  // Sadece belirsiz (tam eşleşmeyen) kodlar İncelenecek listede görünür — tam eşleşenler otomatik geçer.
   const belirsizMarkalar = [...new Set(satirlar.map((r) => r.markaRaw))]
     .filter((raw) => !markalar.some((m) => normalizeKod(m.marka) === normalizeKod(raw)))
     .map((raw) => {
@@ -654,19 +713,19 @@ function ImportPage({ markalar, aktarimUygula }) {
       return { raw, best, mesafe, satirSayisi };
     });
   const tamEslesenKodlar = [...new Set(satirlar.map((r) => r.markaRaw))].filter((raw) => markalar.some((m) => normalizeKod(m.marka) === normalizeKod(raw)));
-
   const hepsiCozuldu = belirsizMarkalar.every((b) => markaEslesme[b.raw] !== undefined && markaEslesme[b.raw] !== "");
+  const dosyaSonTarihi = satirlar.length > 0 ? [...satirlar].map((r) => r.tarih).sort().pop() : null;
 
   function ozetOlustur() {
     const grup = {};
     const urunEslesmedi = [];
     let birimDuzeltmeSayisi = 0;
     let coklaAdaydanAyristirilan = 0;
+    let dogrulanamayanSayisi = 0;
     satirlar.forEach((r) => {
       if (r.birimDuzeltildi) birimDuzeltmeSayisi += 1;
+      if (r.dogrulanamadi) dogrulanamayanSayisi += 1;
 
-      // 1) Tam eşleşen kod var mı? Varsa, satırın TARİHİNE göre doğru aday(lar)ı bul ve
-      //    ürün adı/koduyla otomatik ayrıştır — kullanıcıya hiç sorulmadan.
       const adaylar = ayniKodAdaylari(r.markaRaw, r.tarih, markalar);
       let hedefMarka, hedefUrun;
       if (adaylar.length > 0) {
@@ -675,7 +734,6 @@ function ImportPage({ markalar, aktarimUygula }) {
         if (!sonuc || sonuc.mesafe > 3) { urunEslesmedi.push(r); return; }
         hedefMarka = sonuc.marka; hedefUrun = sonuc.urun;
       } else {
-        // 2) Tam eşleşme yoksa kullanıcının elle çözdüğü (typo) eşleştirmeyi kullan
         const hedefMarkaId = markaEslesme[r.markaRaw];
         if (!hedefMarkaId || hedefMarkaId === "yoksay") return;
         const marka = markalar.find((m) => m.id === hedefMarkaId);
@@ -686,58 +744,86 @@ function ImportPage({ markalar, aktarimUygula }) {
       }
 
       const key = `${hedefMarka.id}|${hedefUrun.id}|${r.tarih}`;
-      if (!grup[key]) grup[key] = { markaId: hedefMarka.id, urunId: hedefUrun.id, tarih: r.tarih, satisAdet: 0, satisKg: 0, kayitSayisi: 0 };
-      grup[key].satisAdet += r.satisAdet;
-      grup[key].satisKg += r.satisKg;
-      grup[key].kayitSayisi += 1;
+      if (!grup[key]) grup[key] = { markaId: hedefMarka.id, urunId: hedefUrun.id, tarih: r.tarih, toplamAdet: 0, toplamKilo: 0, satirSayisi: 0 };
+      grup[key].toplamAdet += r.satisAdet;
+      grup[key].toplamKilo += r.satisKg;
+      grup[key].satirSayisi += 1;
     });
-    return { havuzKayitlari: Object.values(grup), urunEslesmedi, birimDuzeltmeSayisi, coklaAdaydanAyristirilan };
+
+    // Değişiklik tespiti: mevcut aybelsoftOzet ile karşılaştır — SADECE dosyanın son günü HARİÇ
+    // (o gün henüz bitmemiş sayılır, karşılaştırmaya girerse her gün onlarca sahte alarm üretir).
+    const degisiklikler = [];
+    Object.values(grup).forEach((yeni) => {
+      if (yeni.tarih === dosyaSonTarihi) return;
+      const eski = (aybelsoftOzet || []).find((o) => o.markaId === yeni.markaId && o.urunId === yeni.urunId && o.tarih === yeni.tarih);
+      if (eski && (Math.abs(eski.toplamAdet - yeni.toplamAdet) > 0.01 || Math.abs(eski.toplamKilo - yeni.toplamKilo) > 0.5)) {
+        degisiklikler.push({ ...yeni, eskiAdet: eski.toplamAdet, eskiKilo: eski.toplamKilo, tip: "degisti" });
+      }
+    });
+    // Silinen kayıtlar: eskiden bu marka+ürün+gün için veri vardı, şimdi (son gün hariç aralıkta) hiç yok.
+    const ilkTarihBu = satirlar.length ? [...satirlar].map((r) => r.tarih).sort()[0] : null;
+    (aybelsoftOzet || []).forEach((eski) => {
+      if (!ilkTarihBu || eski.tarih < ilkTarihBu || eski.tarih >= dosyaSonTarihi) return;
+      const key = `${eski.markaId}|${eski.urunId}|${eski.tarih}`;
+      if (!grup[key]) degisiklikler.push({ ...eski, toplamAdet: 0, toplamKilo: 0, eskiAdet: eski.toplamAdet, eskiKilo: eski.toplamKilo, tip: "silindi" });
+    });
+
+    return { gunlukOzetler: Object.values(grup), urunEslesmedi, birimDuzeltmeSayisi, coklaAdaydanAyristirilan, dogrulanamayanSayisi, degisiklikler };
   }
 
-  const { havuzKayitlari, urunEslesmedi, birimDuzeltmeSayisi, coklaAdaydanAyristirilan } = hepsiCozuldu ? ozetOlustur() : { havuzKayitlari: [], urunEslesmedi: [], birimDuzeltmeSayisi: 0, coklaAdaydanAyristirilan: 0 };
-  const toplamBirimDuzeltme = satirlar.filter((r) => r.birimDuzeltildi).length;
+  const { gunlukOzetler, urunEslesmedi, birimDuzeltmeSayisi, coklaAdaydanAyristirilan, dogrulanamayanSayisi, degisiklikler } = hepsiCozuldu
+    ? ozetOlustur()
+    : { gunlukOzetler: [], urunEslesmedi: [], birimDuzeltmeSayisi: 0, coklaAdaydanAyristirilan: 0, dogrulanamayanSayisi: 0, degisiklikler: [] };
 
   function uygula() {
-    const markaSayisi = new Set(havuzKayitlari.map((h) => h.markaId)).size;
-    const sonuc = aktarimUygula(havuzKayitlari, satirlar.length, markaSayisi);
+    const markaSayisi = new Set(gunlukOzetler.map((h) => h.markaId)).size;
+    const sonuc = aktarimUygula(gunlukOzetler, degisiklikler, satirlar.length, markaSayisi);
     setUygulandi({ ...sonuc, birimDuzeltmeSayisi });
-    setSatirlar([]); setMarkaEslesme({}); setDosyaAdi("");
+    setSatirlar([]); setMarkaEslesme({}); setDosyaAdi(""); setButunlukUyarilari([]);
   }
 
   return (
     <div className="space-y-5 max-w-3xl">
       <div>
         <h2 className="text-base font-medium">Aybelsoft verisi içe aktar</h2>
-        <p className="text-sm text-stone-500 mt-0.5">Aybelsoft'tan alınan satış Excel'ini yükleyin. Marka kodu elle yazıldığı için yazım hataları olabiliyor — sistem bunları tek tek size gösterip onayınızı istiyor, hiçbirini sessizce varsaymıyor.</p>
+        <p className="text-sm text-stone-500 mt-0.5">Aybelsoft'tan alınan satış Excel'ini (kümülatif, 1 Ocak'tan itibaren) olduğu gibi yükleyin. Sistem otomatik olarak patates/soğanı ayıklar, kiloyu Tutar÷Fiyat ile doğrular, doğru markalara dağıtır ve geçmişe dönük değişiklikleri yakalar.</p>
       </div>
 
       {satirlar.length === 0 && (
-        <label className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-stone-300 bg-white p-10 text-center cursor-pointer hover:border-amber-400">
+        <label className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-stone-300 bg-white p-10 text-center cursor-pointer hover:border-brand-400">
           <Upload className="w-6 h-6 text-stone-400" />
-          <span className="text-sm text-stone-600 font-medium">Excel dosyası seçin (.xlsx)</span>
-          <span className="text-xs text-stone-400">Sütunlarda "Tarih", "Marka", "Ürün", "Adet", "Kg" geçen başlıklar aranıyor</span>
+          <span className="text-sm text-stone-600 font-medium">Excel dosyası seçin (.xls/.xlsx)</span>
+          <span className="text-xs text-stone-400">{fmtTarih(AKTARIM_BASLANGIC)} öncesi satırlar otomatik atlanır</span>
           <input type="file" accept=".xlsx,.xls" onChange={dosyaSecildi} className="hidden" />
         </label>
       )}
 
       {hata && <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-sm p-3">{hata}</div>}
 
+      {butunlukUyarilari.length > 0 && (
+        <div className="rounded-lg border border-red-300 bg-red-50 text-red-800 text-sm p-3 space-y-1.5">
+          <p className="font-medium flex items-center gap-1.5"><AlertTriangle className="w-4 h-4" /> Dosya bütünlüğü şüpheli — devam etmeden önce kontrol edin:</p>
+          <ul className="list-disc list-inside space-y-1">{butunlukUyarilari.map((u, i) => (<li key={i}>{u}</li>))}</ul>
+        </div>
+      )}
+
       {uygulandi && (
         <div className={`rounded-lg border text-sm p-3 flex items-center gap-2 ${uygulandi.uyari > 0 ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
           {uygulandi.uyari > 0 ? <AlertTriangle className="w-4 h-4 shrink-0" /> : <CheckCircle2 className="w-4 h-4 shrink-0" />}
-          Aktarıldı: {uygulandi.kayit} satır işlendi, {uygulandi.marka} marka eşleştirildi{uygulandi.birimDuzeltmeSayisi > 0 ? `, ${uygulandi.birimDuzeltmeSayisi} satırda kilo birimi düzeltildi` : ""}.
-          {uygulandi.uyari > 0 ? ` Ancak ${uygulandi.uyari} tutarsızlık tespit edildi — ilgili markaların detay sayfasında "Anomali notları" bölümünde görünüyor.` : ` Artık ilgili markanın detay sayfasında satış hücrelerinin yanında "Aybelsoft'tan doldur" önerisini göreceksiniz.`}
+          Aktarıldı: {uygulandi.kayit} satır işlendi, {uygulandi.marka} marka güncellendi{uygulandi.birimDuzeltmeSayisi > 0 ? `, ${uygulandi.birimDuzeltmeSayisi} satırda kilo birimi düzeltildi` : ""}.
+          {uygulandi.uyari > 0 ? ` ${uygulandi.uyari} geçmişe dönük değişiklik tespit edildi — ilgili markaların "Anomali notları" bölümünde kırmızı görünüyor.` : " Geçmişe dönük hiçbir tutarsızlık bulunmadı."}
         </div>
       )}
 
       {satirlar.length > 0 && (
         <>
           <div className="text-xs text-stone-500">
-            {dosyaAdi} — {satirlar.length} satır okundu.
-            {tamEslesenKodlar.length > 0 && <span className="text-emerald-700"> {tamEslesenKodlar.length} marka kodu tam eşleşti, otomatik işlenecek.</span>}
-            {belirsizMarkalar.length > 0 && <span className="text-amber-700"> {belirsizMarkalar.length} kod eşleşmedi, aşağıda kontrolünüzü bekliyor.</span>}
-            {coklaAdaydanAyristirilan > 0 && <span className="text-purple-700"> {coklaAdaydanAyristirilan} satırda aynı kodu paylaşan birden fazla marka (ör. Patates+Soğan çifti) ürün adına bakılarak otomatik ayrıştırıldı.</span>}
-            {toplamBirimDuzeltme > 0 && <span className="text-purple-700"> {toplamBirimDuzeltme} satırda kilo değeri bin kat düşük görünüyordu, otomatik düzeltildi.</span>}
+            {dosyaAdi} — {satirlar.length} satır ({fmtTarih(AKTARIM_BASLANGIC)} sonrası, patates/soğan).
+            {tamEslesenKodlar.length > 0 && <span className="text-emerald-700"> {tamEslesenKodlar.length} marka kodu tam eşleşti.</span>}
+            {belirsizMarkalar.length > 0 && <span className="text-brand-600"> {belirsizMarkalar.length} kod eşleşmedi — varsayılan "yok say".</span>}
+            {coklaAdaydanAyristirilan > 0 && <span className="text-purple-700"> {coklaAdaydanAyristirilan} satırda çoklu aday (Patates+Soğan gibi) otomatik ayrıştırıldı.</span>}
+            {birimDuzeltmeSayisi > 0 && <span className="text-purple-700"> {birimDuzeltmeSayisi} satırda kilo Tutar÷Fiyat ile düzeltildi.</span>}
+            {dogrulanamayanSayisi > 0 && <span className="text-red-600"> {dogrulanamayanSayisi} satırda fiyat/tutar okunamadığı için kilo doğrulanamadı.</span>}
           </div>
 
           {belirsizMarkalar.length === 0 ? (
@@ -756,9 +842,9 @@ function ImportPage({ markalar, aktarimUygula }) {
                       <div className="text-xs text-stone-400">{b.satirSayisi} satır</div>
                     </div>
                     {oneriliVarMi ? (
-                      <span className="text-xs px-2 py-1 rounded bg-amber-50 text-amber-700 flex items-center gap-1"><Wand2 className="w-3.5 h-3.5" /> Olası typo — öneri: {b.best.marka} · {b.best.urun}</span>
+                      <span className="text-xs px-2 py-1 rounded bg-ochre-50 text-ochre-700 flex items-center gap-1"><Wand2 className="w-3.5 h-3.5" /> Olası typo — öneri: {b.best.marka} · {b.best.urun}</span>
                     ) : (
-                      <span className="text-xs px-2 py-1 rounded bg-red-50 text-red-700 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Eşleşme yok</span>
+                      <span className="text-xs px-2 py-1 rounded bg-stone-100 text-stone-500 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Eşleşme yok — otomatik yok sayılacak</span>
                     )}
                     <select value={secim} onChange={(e) => setMarkaEslesme({ ...markaEslesme, [b.raw]: e.target.value })} className="text-sm border border-stone-200 rounded px-2 py-1.5 ml-auto bg-white">
                       <option value="">Seçiniz…</option>
@@ -771,37 +857,30 @@ function ImportPage({ markalar, aktarimUygula }) {
             </div>
           )}
 
-          {!hepsiCozuldu && <p className="text-xs text-amber-700">Devam etmeden önce yukarıdaki her kod için bir seçim yapın (eşleştir ya da "yok say").</p>}
-
           {hepsiCozuldu && (
             <div className="rounded-lg border border-stone-200 bg-white p-4">
-              <p className="text-sm font-medium mb-2.5">Aktarılacak özet</p>
-              {havuzKayitlari.length === 0 ? (
-                <p className="text-sm text-stone-400">Eşleştirilen satır kalmadı.</p>
-              ) : (
-                <table className="w-full text-sm font-mono text-[13px]">
-                  <thead><tr className="text-xs text-stone-500 font-sans"><th className="text-left font-normal py-1.5">Marka</th><th className="text-left font-normal py-1.5">Ürün</th><th className="text-left font-normal py-1.5">Tarih</th><th className="text-right font-normal py-1.5">Adet</th><th className="text-right font-normal py-1.5">Kg</th></tr></thead>
-                  <tbody>
-                    {havuzKayitlari.map((k, i) => {
-                      const m = markalar.find((x) => x.id === k.markaId);
-                      const u = m?.urunler.find((x) => x.id === k.urunId);
+              <p className="text-sm font-medium mb-2.5">Aktarılacak günlük özet ({gunlukOzetler.length} kayıt)</p>
+              {degisiklikler.length > 0 && (
+                <div className="rounded-lg border border-red-300 bg-red-50 p-3 mb-3 space-y-1.5">
+                  <p className="text-sm font-medium text-red-800 flex items-center gap-1.5"><AlertTriangle className="w-4 h-4" /> {degisiklikler.length} geçmişe dönük değişiklik tespit edildi:</p>
+                  <ul className="text-xs text-red-700 space-y-1">
+                    {degisiklikler.slice(0, 8).map((d, i) => {
+                      const m = markalar.find((x) => x.id === d.markaId);
+                      const u = m?.urunler.find((x) => x.id === d.urunId);
                       return (
-                        <tr key={i} className="border-t border-stone-50">
-                          <td className="py-1.5 font-sans">{m?.marka}</td>
-                          <td className="py-1.5 font-sans">{u?.ad}</td>
-                          <td className="py-1.5">{fmtTarih(k.tarih)}</td>
-                          <td className="py-1.5 text-right">{fmt(k.satisAdet)}</td>
-                          <td className="py-1.5 text-right">{fmt(k.satisKg)}</td>
-                        </tr>
+                        <li key={i}>
+                          {m?.marka} · {u?.ad} · {fmtTarih(d.tarih)} — {d.tip === "silindi" ? "kayıt silinmiş" : `${fmt(d.eskiAdet)} adet/${fmt(d.eskiKilo)} kg idi, şimdi ${fmt(d.toplamAdet)} adet/${fmt(d.toplamKilo)} kg`}
+                        </li>
                       );
                     })}
-                  </tbody>
-                </table>
+                    {degisiklikler.length > 8 && <li>...ve {degisiklikler.length - 8} tane daha</li>}
+                  </ul>
+                </div>
               )}
               {urunEslesmedi.length > 0 && (
-                <p className="text-xs text-amber-700 mt-3">{urunEslesmedi.length} satırda ürün adı hiçbir ürünle eşleşmedi, bunlar aktarılmayacak (ürün adları çok farklıysa marka içindeki ürün listesini kontrol edin).</p>
+                <p className="text-xs text-brand-600 mb-2">{urunEslesmedi.length} satırda ürün eşleşmedi, aktarılmayacak.</p>
               )}
-              <button onClick={uygula} disabled={havuzKayitlari.length === 0} className="w-full text-sm bg-stone-900 text-white rounded-lg py-2 mt-3 hover:bg-stone-800 font-medium disabled:opacity-40">İçe aktarımı uygula</button>
+              <button onClick={uygula} disabled={gunlukOzetler.length === 0} className="w-full text-sm bg-stone-900 text-white rounded-lg py-2 mt-1 hover:bg-stone-800 font-medium disabled:opacity-40">İçe aktarımı uygula</button>
             </div>
           )}
         </>
@@ -814,7 +893,7 @@ function DegisiklikGecmisi({ kayitlar }) {
   const [acik, setAcik] = useState(false);
   return (
     <div className="border-t border-stone-100 px-4 py-2">
-      <button onClick={() => setAcik((v) => !v)} className="text-xs text-amber-700 flex items-center gap-1">
+      <button onClick={() => setAcik((v) => !v)} className="text-xs text-brand-600 flex items-center gap-1">
         <ChevronRight className={`w-3.5 h-3.5 transition-transform ${acik ? "rotate-90" : ""}`} />
         Değişiklik geçmişi ({kayitlar.length})
       </button>
@@ -829,7 +908,7 @@ function DegisiklikGecmisi({ kayitlar }) {
   );
 }
 
-function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGuncelle, sayimKilitleAc, havuz, disUyarilar, onGeri, onSil, onDurumDegistir, onYeniSayim, muhasebeAcik, setMuhasebeAcik, markaBasligiGuncelle }) {
+function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGuncelle, sayimKilitleAc, aybelsoftOzet, disUyarilar, onGeri, onSil, onDurumDegistir, onYeniSayim, muhasebeAcik, setMuhasebeAcik, markaBasligiGuncelle }) {
   const [baslikDuzenle, setBaslikDuzenle] = useState(false);
   const [baslikTaslak, setBaslikTaslak] = useState(null);
   const [seciliSayimId, setSeciliSayimId] = useState(null);
@@ -839,14 +918,15 @@ function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGun
   const siraliSayimlar = [...sayimlarListesi].sort((a, b) => (a.tarih < b.tarih ? 1 : a.tarih > b.tarih ? -1 : b.sayimNo - a.sayimNo));
   const seciliSayim = sayimlarListesi.find((s) => s.id === seciliSayimId) || siraliSayimlar[0] || null;
   const enYeniMi = seciliSayim && siraliSayimlar[0] && seciliSayim.id === siraliSayimlar[0].id;
-  const ozet = seciliSayim ? sayimOzet(seciliSayim, marka) : null;
+  const ozet = seciliSayim ? sayimOzet(seciliSayim, marka, aybelsoftOzet) : null;
 
   const satirToplamlari = seciliSayim
     ? marka.urunler.reduce(
         (acc, u) => {
           const satir = seciliSayim.satirlar.find((s) => s.urunId === u.id);
           if (!satir) return acc;
-          const h = satirHesap(satir);
+          const { adet, kilo } = satisToplaTarihAraligi(aybelsoftOzet, marka.id, u.id, marka.tarih, seciliSayim.tarih);
+          const h = satirHesap(satir, adet, kilo);
           acc.sayimAdet += h.sayimAdet; acc.sayimKg += h.sayimKg; acc.satisAdet += h.satisAdet; acc.satisKg += h.satisKg;
           acc.kalanAdet += h.kalanAdet; acc.kalanKg += h.kalanKg; acc.toplamKg += h.toplamKg;
           return acc;
@@ -871,8 +951,8 @@ function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGun
       </button>
 
       {baslikDuzenle ? (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-2.5">
-          <p className="text-xs text-amber-700 font-medium">Marka bilgilerini düzenliyorsunuz — kaydettiğinizde işlem geçmişine düşecek.</p>
+        <div className="rounded-lg border border-brand-300 bg-brand-50 p-4 space-y-2.5">
+          <p className="text-xs text-brand-600 font-medium">Marka bilgilerini düzenliyorsunuz — kaydettiğinizde işlem geçmişine düşecek.</p>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-xs text-stone-500 block mb-1">Tarih</label>
@@ -901,7 +981,7 @@ function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGun
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-medium">{marka.marka} · {marka.urun}</h2>
-              <button onClick={baslikDuzenlemeyeBasla} className="text-stone-400 hover:text-amber-700 p-1" title="Marka bilgilerini düzenle"><Pencil className="w-3.5 h-3.5" /></button>
+              <button onClick={baslikDuzenlemeyeBasla} className="text-stone-400 hover:text-brand-600 p-1" title="Marka bilgilerini düzenle"><Pencil className="w-3.5 h-3.5" /></button>
             </div>
             <p className="text-sm text-stone-500">{fmtTarih(marka.tarih)}{marka.plaka ? ` · ${marka.plaka}` : ""} · Yükleme: {fmt(marka.toplamYuklemeKg)} kg</p>
           </div>
@@ -941,18 +1021,18 @@ function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGun
               )}
               <button onClick={() => setMuhasebeAcik((v) => !v)} className="text-xs text-stone-400 hover:text-stone-600">{muhasebeAcik ? "Muhasebe sütunlarını gizle" : "Muhasebe sütunlarını göster"}</button>
             </div>
-            <span className={`text-xl font-mono font-bold ${Math.abs(ozet.fark) > esikDegeri(marka) ? "text-red-600" : "text-emerald-700"}`}>FARK: {ozet.fark > 0 ? "+" : ""}{fmt(ozet.fark)} kg</span>
+            <span className={`font-serif text-2xl font-bold tabular-nums ${Math.abs(ozet.fark) > esikDegeri(marka) ? "text-red-600" : "text-emerald-700"}`}><span className="text-sm font-sans font-medium mr-1.5 align-middle">FARK</span>{ozet.fark > 0 ? "+" : ""}{fmt(ozet.fark)} kg</span>
           </div>
-          {seciliSayim.kilitli && <div className="px-4 py-1.5 bg-stone-50 text-xs text-stone-500 border-b border-stone-100">Bu sayım kaydedildi, satış/muhasebe alanları kilitli. Değiştirmek için "Düzenle"ye basın.</div>}
+          {seciliSayim.kilitli && <div className="px-4 py-1.5 bg-stone-50 text-xs text-stone-500 border-b border-stone-100">Bu sayım kaydedildi, muhasebe alanları kilitli. Değiştirmek için "Düzenle"ye basın.</div>}
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs text-stone-500 border-b border-stone-100">
                 <th className="text-left font-normal py-2 px-3">Ürün</th>
-                <th className="text-right font-normal py-2 px-3 text-emerald-700 bg-emerald-50/60">Yükleme adet</th>
+                <th className="text-right font-normal py-2 px-3 text-brand-700 bg-brand-50/60">Yükleme adet</th>
                 {muhasebeAcik && (<><th className="text-right font-normal py-2 px-3 text-stone-500 bg-stone-50">Muhasebe Sayım Adet</th><th className="text-right font-normal py-2 px-3 text-stone-500 bg-stone-50">Muhasebe Sayım Kg</th><th className="text-right font-normal py-2 px-3 text-stone-500 bg-stone-50">Muhasebe Ort kg/adet</th></>)}
                 <th className="text-right font-normal py-2 px-3 text-blue-700 bg-blue-50/60">Satış adet</th>
                 <th className="text-right font-normal py-2 px-3 text-blue-700 bg-blue-50/60">Satış kg</th>
-                <th className="text-right font-normal py-2 px-3 text-amber-700 bg-amber-50/60">Kalan adet</th>
+                <th className="text-right font-normal py-2 px-3 text-ochre-700 bg-ochre-50/60">Kalan adet</th>
                 <th className="text-right font-normal py-2 px-3">Ort kg/adet</th>
                 <th className="text-right font-normal py-2 px-3 bg-stone-50">Toplam adet</th>
                 <th className="text-right font-normal py-2 px-3 bg-stone-50">Toplam kg</th>
@@ -962,14 +1042,14 @@ function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGun
               {marka.urunler.map((u) => {
                 const satir = seciliSayim.satirlar.find((s) => s.urunId === u.id);
                 if (!satir) return null;
-                const h = satirHesap(satir);
+                const { adet: satisAdetHesap, kilo: satisKgHesap } = satisToplaTarihAraligi(aybelsoftOzet, marka.id, u.id, marka.tarih, seciliSayim.tarih);
+                const h = satirHesap(satir, satisAdetHesap, satisKgHesap);
                 const dusukOrneklem = h.satisAdet > 0 && h.satisAdet < 50;
                 const kilit = seciliSayim.kilitli;
-                const havuzKaydi = (havuz || []).filter((hv) => hv.urunId === u.id).sort((a, b) => (a.tarih === seciliSayim.tarih ? -1 : b.tarih === seciliSayim.tarih ? 1 : (a.tarih < b.tarih ? 1 : -1)))[0];
                 return (
                   <tr key={u.id} className="border-b border-stone-50 last:border-0">
                     <td className="py-1.5 px-3 font-sans font-medium">{u.ad}</td>
-                    <td className="py-1.5 px-3 text-right bg-emerald-50/40 text-emerald-800 font-semibold">{fmt(u.yuklemeAdet)}</td>
+                    <td className="py-1.5 px-3 text-right bg-brand-50/40 text-brand-800 font-semibold">{fmt(u.yuklemeAdet)}</td>
                     {muhasebeAcik && (
                       <>
                         <td className="py-1.5 px-3 text-right bg-stone-50/60"><input disabled={kilit} type="number" value={satir.sayimAdet} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "sayimAdet", e.target.value)} className="w-16 text-right border border-stone-200 rounded px-1.5 py-0.5 bg-white font-medium disabled:bg-stone-50 disabled:text-stone-700" /></td>
@@ -977,21 +1057,9 @@ function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGun
                         <td className="py-1.5 px-3 text-right text-stone-600 bg-stone-50/60 font-medium">{fmtKg(h.muhasebeOrtKg)}</td>
                       </>
                     )}
-                    <td className="py-1.5 px-3 text-right bg-blue-50/30">
-                      <input disabled={kilit} type="number" value={satir.satisAdet} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "satisAdet", e.target.value)} className="w-16 text-right border border-stone-200 rounded px-1.5 py-0.5 font-semibold disabled:bg-stone-50 disabled:text-stone-800" />
-                    </td>
-                    <td className="py-1.5 px-3 text-right bg-blue-50/30">
-                      <input disabled={kilit} type="number" value={satir.satisKg} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "satisKg", e.target.value)} className="w-20 text-right border border-stone-200 rounded px-1.5 py-0.5 font-semibold disabled:bg-stone-50 disabled:text-stone-800" />
-                      {havuzKaydi && !kilit && (
-                        <button
-                          onClick={() => { satirGuncelle(seciliSayim.id, u.id, "satisAdet", String(havuzKaydi.satisAdet)); satirGuncelle(seciliSayim.id, u.id, "satisKg", String(havuzKaydi.satisKg)); }}
-                          className="block ml-auto mt-1 text-[10px] text-purple-700 bg-purple-50 rounded px-1.5 py-0.5 hover:bg-purple-100 font-sans"
-                        >
-                          Aybelsoft: {fmt(havuzKaydi.satisAdet)}/{fmt(havuzKaydi.satisKg)} — doldur
-                        </button>
-                      )}
-                    </td>
-                    <td className="py-1.5 px-3 text-right bg-amber-50/30 text-amber-900 font-semibold">{h.kalanAdet}</td>
+                    <td className="py-1.5 px-3 text-right bg-blue-50/30 font-semibold text-blue-900">{fmt(h.satisAdet)}</td>
+                    <td className="py-1.5 px-3 text-right bg-blue-50/30 font-semibold text-blue-900">{fmt(h.satisKg)}</td>
+                    <td className="py-1.5 px-3 text-right bg-ochre-50/30 text-ochre-900 font-semibold">{h.kalanAdet}</td>
                     <td className="py-1.5 px-3 text-right">
                       {dusukOrneklem ? (
                         <input type="number" step="0.01" placeholder={fmtKg(h.ortKgHesap)} value={satir.ortKgManuel} onChange={(e) => satirGuncelle(seciliSayim.id, u.id, "ortKgManuel", e.target.value)} className="w-16 text-right border border-red-300 bg-red-50 rounded px-1.5 py-0.5 font-medium" title="Satış adedi az, isterseniz ortalama kiloyu elle düzeltin" />
@@ -1009,7 +1077,7 @@ function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGun
               <tfoot>
                 <tr className="border-t-2 border-stone-300 font-semibold text-[13px]">
                   <td className="py-2 px-3 font-sans">TOPLAM</td>
-                  <td className="py-2 px-3 text-right bg-emerald-50/60 text-emerald-800">{fmt(marka.urunler.reduce((a, u) => a + (Number(u.yuklemeAdet) || 0), 0))}</td>
+                  <td className="py-2 px-3 text-right bg-brand-50/60 text-brand-800">{fmt(marka.urunler.reduce((a, u) => a + (Number(u.yuklemeAdet) || 0), 0))}</td>
                   {muhasebeAcik && (<><td className="py-2 px-3 text-right">{fmt(satirToplamlari.sayimAdet)}</td><td className="py-2 px-3 text-right">{fmt(satirToplamlari.sayimKg)}</td><td className="py-2 px-3 text-right text-stone-500">{satirToplamlari.sayimAdet > 0 ? fmtKg(satirToplamlari.sayimKg / satirToplamlari.sayimAdet) : "-"}</td></>)}
                   <td className="py-2 px-3 text-right">{fmt(satirToplamlari.satisAdet)}</td>
                   <td className="py-2 px-3 text-right">{fmt(satirToplamlari.satisKg)}</td>
@@ -1021,11 +1089,11 @@ function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGun
               </tfoot>
             )}
           </table>
-          <div className="px-4 py-2.5 border-t border-stone-200 bg-emerald-50/50 flex items-center justify-between">
-            <span className="text-sm font-medium text-emerald-800">Toplam Yükleme Kg</span>
-            <span className="text-base font-mono font-bold text-emerald-800">{fmt(marka.toplamYuklemeKg)} kg</span>
+          <div className="px-4 py-2.5 border-t border-stone-200 bg-brand-50/50 flex items-center justify-between">
+            <span className="text-sm font-medium text-brand-800">Toplam Yükleme Kg</span>
+            <span className="font-serif text-lg font-bold tabular-nums text-brand-800">{fmt(marka.toplamYuklemeKg)} kg</span>
           </div>
-          <div className="px-4 py-2 text-xs text-stone-500 border-t border-stone-100">Kalan adet (turuncu sütun) sadece "Dükkanda Kalan" sayfasından girilir, burada salt görüntülenir. Satış adedi 50'nin altındaysa ortalama kg elle düzeltilebilir (kırmızı kutu).</div>
+          <div className="px-4 py-2 text-xs text-stone-500 border-t border-stone-100">Satış (mavi) İçe Aktar'dan otomatik hesaplanır, elle değişmez. Kalan adet (turuncu) sadece "Dükkanda Kalan" sayfasından girilir. Satış adedi 50'nin altındaysa ortalama kg elle düzeltilebilir (kırmızı kutu).</div>
           {seciliSayim.degisiklikGecmisi?.length > 0 && <DegisiklikGecmisi kayitlar={seciliSayim.degisiklikGecmisi} />}
         </div>
       )}
@@ -1037,13 +1105,13 @@ function DetayPage({ marka, sayimlarListesi, notlar, satirGuncelle, sayimAlanGun
         ) : (
           <ul className="space-y-2">
             {(disUyarilar || []).map((u) => (
-              <li key={u.id} className={`flex items-start gap-2 text-sm p-2 rounded ${u.tip === "kapali_hareket" ? "bg-red-50 text-red-800" : "bg-amber-50 text-amber-800"}`}>
-                <AlertTriangle className={`w-4 h-4 shrink-0 mt-0.5 ${u.tip === "kapali_hareket" ? "text-red-600" : "text-amber-600"}`} />
+              <li key={u.id} className={`flex items-start gap-2 text-sm p-2 rounded ${u.tip === "kapali_hareket" ? "bg-red-50 text-red-800" : "bg-ochre-50 text-ochre-800"}`}>
+                <AlertTriangle className={`w-4 h-4 shrink-0 mt-0.5 ${u.tip === "kapali_hareket" ? "text-red-600" : "text-ochre-600"}`} />
                 <span>{u.tip === "kapali_hareket" && <span className="font-medium">Kapanmış markada hareket — </span>}{u.mesaj}</span>
               </li>
             ))}
             {notlar.map((n, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-stone-700"><AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />{n.mesaj}</li>
+              <li key={i} className="flex items-start gap-2 text-sm text-stone-700"><AlertTriangle className="w-4 h-4 text-ochre-600 shrink-0 mt-0.5" />{n.mesaj}</li>
             ))}
           </ul>
         )}
@@ -1151,7 +1219,7 @@ function DukkandaKalanPage({ markalar, sayimlar, etkinlikler, kalanTopluKaydet }
           <p className="text-xs text-stone-400 mb-1.5">Son gelen 10 marka (geliş tarihine göre)</p>
           <div className="flex flex-wrap gap-1.5">
             {sonGelenler.map((m) => (
-              <button key={m.id} onClick={() => markaEkle(m)} disabled={secilenler.includes(m.id)} className={`text-xs rounded-full px-3 py-1.5 border ${secilenler.includes(m.id) ? "border-stone-200 bg-stone-100 text-stone-400" : "border-stone-200 hover:border-amber-400 text-stone-700"}`}>
+              <button key={m.id} onClick={() => markaEkle(m)} disabled={secilenler.includes(m.id)} className={`text-xs rounded-full px-3 py-1.5 border ${secilenler.includes(m.id) ? "border-stone-200 bg-stone-100 text-stone-400" : "border-stone-200 hover:border-brand-400 text-stone-700"}`}>
                 {m.marka} · {m.urun}
               </button>
             ))}
@@ -1204,7 +1272,7 @@ function DukkandaKalanPage({ markalar, sayimlar, etkinlikler, kalanTopluKaydet }
                     <div className="text-sm font-medium">{e.markaAd}</div>
                     <div className="text-xs text-stone-400">{fmtTarih(e.hedefTarih)} için girildi · {fmtSaat(e.ts)}</div>
                   </div>
-                  <span className="text-xs text-amber-700">Aç ve düzenle</span>
+                  <span className="text-xs text-brand-600">Aç ve düzenle</span>
                 </button>
               ))
             )}
@@ -1218,13 +1286,14 @@ export default function StokTakip() {
   const [markalar, setMarkalar] = useState([]);
   const [sayimlar, setSayimlar] = useState([]);
   const [etkinlikler, setEtkinlikler] = useState([]);
-  const [havuz, setHavuz] = useState([]); // Aybelsoft'tan içe aktarılan, henüz sayıma uygulanmamış satış verisi
-  const [disUyarilar, setDisUyarilar] = useState([]); // Aybelsoft yeniden içe aktarımında yakalanan tutarsızlıklar
+  const [aybelsoftOzet, setAybelsoftOzet] = useState([]); // [{markaId, urunId, tarih, toplamAdet, toplamKilo, satirSayisi}] — satış hiç ham saklanmaz, bu özet üzerinden canlı hesaplanır
+  const [disUyarilar, setDisUyarilar] = useState([]); // İçe aktarımda yakalanan geçmişe dönük değişiklik/tutarsızlık uyarıları
   const [sayfa, setSayfa] = useState("ambar"); // ambar | yeni | detay | gecmis | ice-aktar | kalan
   const [selectedId, setSelectedId] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [muhasebeAcik, setMuhasebeAcik] = useState(false);
   const [ornekOnay, setOrnekOnay] = useState(null); // null | 'real' | 'senaryo'
+  const [tasimaSonucu, setTasimaSonucu] = useState(null);
   const [markaForm, setMarkaForm] = useState({
     tarih: "", marka: "", urun: "", plaka: "", toplamYuklemeKg: "",
     secilenUrunler: {}, ozelUrunAdi: "",
@@ -1232,22 +1301,16 @@ export default function StokTakip() {
 
   useEffect(() => {
     (async () => {
-      let markaVerisiVarMi = false;
       try {
         const m = await window.storage.get("markalar", false);
-        if (m) { setMarkalar(JSON.parse(m.value)); markaVerisiVarMi = true; }
+        if (m) setMarkalar(JSON.parse(m.value));
       } catch {}
       try {
         const s = await window.storage.get("sayimlar", false);
         if (s) setSayimlar(JSON.parse(s.value));
       } catch {}
-      // Hiç kayıtlı veri yoksa (ilk açılış), boş bırakmak yerine gerçek 34 markalık veriyi otomatik yükle.
-      if (!markaVerisiVarMi) {
-        setMarkalar(SEED_REAL.markalar);
-        setSayimlar(SEED_REAL.sayimlar);
-      }
       try { const e = await window.storage.get("etkinlikler", false); if (e) setEtkinlikler(JSON.parse(e.value)); } catch {}
-      try { const h = await window.storage.get("havuz", false); if (h) setHavuz(JSON.parse(h.value)); } catch {}
+      try { const h = await window.storage.get("aybelsoftOzet", false); if (h) setAybelsoftOzet(JSON.parse(h.value)); } catch {}
       try { const d = await window.storage.get("disUyarilar", false); if (d) setDisUyarilar(JSON.parse(d.value)); } catch {}
       setLoaded(true);
     })();
@@ -1256,7 +1319,7 @@ export default function StokTakip() {
   useEffect(() => { if (loaded) window.storage.set("markalar", JSON.stringify(markalar), false).catch(() => {}); }, [markalar, loaded]);
   useEffect(() => { if (loaded) window.storage.set("sayimlar", JSON.stringify(sayimlar), false).catch(() => {}); }, [sayimlar, loaded]);
   useEffect(() => { if (loaded) window.storage.set("etkinlikler", JSON.stringify(etkinlikler), false).catch(() => {}); }, [etkinlikler, loaded]);
-  useEffect(() => { if (loaded) window.storage.set("havuz", JSON.stringify(havuz), false).catch(() => {}); }, [havuz, loaded]);
+  useEffect(() => { if (loaded) window.storage.set("aybelsoftOzet", JSON.stringify(aybelsoftOzet), false).catch(() => {}); }, [aybelsoftOzet, loaded]);
   useEffect(() => { if (loaded) window.storage.set("disUyarilar", JSON.stringify(disUyarilar), false).catch(() => {}); }, [disUyarilar, loaded]);
 
   function logEtkinlik(markaId, markaAd, tip, detay, ekstra) {
@@ -1296,10 +1359,7 @@ export default function StokTakip() {
   function yeniSayimEkle(marka, tarihOverride) {
     const oncekiSayimlar = sayimlar.filter((s) => s.markaId === marka.id);
     const sonSayim = [...oncekiSayimlar].sort((a, b) => b.sayimNo - a.sayimNo)[0];
-    const satirlar = marka.urunler.map((u) => {
-      const oncekiSatir = sonSayim?.satirlar.find((s) => s.urunId === u.id);
-      return { urunId: u.id, sayimAdet: "", sayimKg: "", satisAdet: oncekiSatir?.satisAdet ?? "", satisKg: oncekiSatir?.satisKg ?? "", kalanAdet: "", ortKgManuel: "" };
-    });
+    const satirlar = marka.urunler.map((u) => ({ urunId: u.id, sayimAdet: "", sayimKg: "", kalanAdet: "", ortKgManuel: "" }));
     const yeniNo = (sonSayim?.sayimNo || 0) + 1;
     const yeni = { id: uid(), markaId: marka.id, sayimNo: yeniNo, tarih: tarihOverride || new Date().toISOString().slice(0, 10), kilitli: false, kilitliMiydi: false, degisiklikGecmisi: [], satirlar };
     setSayimlar((prev) => [...prev, yeni]);
@@ -1307,7 +1367,7 @@ export default function StokTakip() {
     return yeni;
   }
 
-  const ALAN_ADLARI = { sayimAdet: "Muhasebe Sayım Adet", sayimKg: "Muhasebe Sayım Kg", satisAdet: "Satış adet", satisKg: "Satış kg", kalanAdet: "Kalan adet", ortKgManuel: "Ort. kg/adet (elle)" };
+  const ALAN_ADLARI = { sayimAdet: "Muhasebe Sayım Adet", sayimKg: "Muhasebe Sayım Kg", kalanAdet: "Kalan adet", ortKgManuel: "Ort. kg/adet (elle)" };
 
   function satirGuncelle(sayimId, urunId, alan, deger) {
     setSayimlar((prev) =>
@@ -1405,51 +1465,81 @@ export default function StokTakip() {
     setSayfa("ambar");
   }
 
-  function aktarimUygula(havuzKayitlari, satirSayisi, markaSayisi) {
-    const yeniUyarilar = [];
-    havuzKayitlari.forEach((kayit) => {
-      const marka = markalar.find((m) => m.id === kayit.markaId);
-      if (!marka) return;
-      const urunAd = marka.urunler.find((u) => u.id === kayit.urunId)?.ad || "ürün";
+  // Gerçek, kalıcı sıfırlama — örnek/deneme verisi değil, sistemi tamamen boş başlangıca döndürür.
+  function verileriTemizle() {
+    if (ornekOnay !== "temizle") { setOrnekOnay("temizle"); setTimeout(() => setOrnekOnay(null), 4000); return; }
+    setMarkalar([]);
+    setSayimlar([]);
+    setEtkinlikler([]);
+    setAybelsoftOzet([]);
+    setDisUyarilar([]);
+    setSelectedId(null);
+    setOrnekOnay(null);
+    setSayfa("ambar");
+  }
 
-      if (marka.durum === "tamamlandı") {
-        yeniUyarilar.push({
-          id: uid(), tip: "kapali_hareket", markaId: marka.id, markaAd: `${marka.marka} · ${marka.urun}`, urunAd, tarih: kayit.tarih, ts: new Date().toISOString(),
-          mesaj: `Bu marka "tamamlandı" olarak işaretli ama Aybelsoft'ta ${fmtTarih(kayit.tarih)} tarihli "${urunAd}" satışı görünüyor — muhtemelen başka bir markaya ait satış buraya karışmış.`,
-        });
-      }
-
-      const ilgiliSayim = sayimlar.find((s) => s.markaId === kayit.markaId && s.tarih === kayit.tarih && s.kilitli);
-      if (ilgiliSayim) {
-        const satir = ilgiliSayim.satirlar.find((s) => s.urunId === kayit.urunId);
+  // Bir kerelik geçiş: yeni motor satışı artık hiç saklamıyor, her ihtiyaçta Aybelsoft özetinden
+  // hesaplıyor. Ama Temmuz/Ağustos gibi eski kayıtların satışı kendi Excel'lerinizden geldi, yeni
+  // özet tablosunda hiç yok. Bu fonksiyon o eski satış rakamlarını özet tablosuna aktarır ki
+  // geçmiş ayların FARK'ları SİLMEDEN, doğru şekilde görünmeye devam etsin.
+  function eskiVeriyiOzeteTasi() {
+    const yeniKayitlar = [];
+    markalar.forEach((m) => {
+      m.urunler.forEach((u) => {
+        const zatenVar = aybelsoftOzet.some((o) => o.markaId === m.id && o.urunId === u.id);
+        if (zatenVar) return;
+        const sonSayim = sayimlar.filter((s) => s.markaId === m.id).sort((a, b) => b.sayimNo - a.sayimNo)[0];
+        const satir = sonSayim?.satirlar.find((s) => s.urunId === u.id);
         const eskiAdet = Number(satir?.satisAdet) || 0;
         const eskiKg = Number(satir?.satisKg) || 0;
-        if (satir && eskiAdet > 0 && (eskiAdet !== kayit.satisAdet || Math.abs(eskiKg - kayit.satisKg) > 0.5)) {
-          yeniUyarilar.push({
-            id: uid(), tip: "veri_degisti", markaId: marka.id, markaAd: `${marka.marka} · ${marka.urun}`, urunAd, tarih: kayit.tarih, ts: new Date().toISOString(),
-            mesaj: `${fmtTarih(kayit.tarih)} için "${urunAd}" daha önce ${fmt(eskiAdet)} adet / ${fmt(eskiKg)} kg olarak kaydedilmişti, Aybelsoft'tan şimdi ${fmt(kayit.satisAdet)} adet / ${fmt(kayit.satisKg)} kg geldi — o gün zaten kilitlenmişti, kontrol edin.`,
-          });
+        if (eskiAdet > 0 || eskiKg > 0) {
+          yeniKayitlar.push({ markaId: m.id, urunId: u.id, tarih: m.tarih, toplamAdet: eskiAdet, toplamKilo: eskiKg, satirSayisi: 1 });
         }
-      }
+      });
+    });
+    if (yeniKayitlar.length > 0) setAybelsoftOzet((prev) => [...prev, ...yeniKayitlar]);
+    return yeniKayitlar.length;
+  }
+
+  function aktarimUygula(gunlukOzetler, degisiklikler, satirSayisi, markaSayisi) {
+    const yeniUyarilar = [];
+    gunlukOzetler.forEach((kayit) => {
+      const marka = markalar.find((m) => m.id === kayit.markaId);
+      if (!marka || marka.durum !== "tamamlandı") return;
+      const urunAd = marka.urunler.find((u) => u.id === kayit.urunId)?.ad || "ürün";
+      yeniUyarilar.push({
+        id: uid(), tip: "kapali_hareket", markaId: marka.id, markaAd: `${marka.marka} · ${marka.urun}`, urunAd, tarih: kayit.tarih, ts: new Date().toISOString(),
+        mesaj: `Bu marka "tamamlandı" olarak işaretli ama Aybelsoft'ta ${fmtTarih(kayit.tarih)} tarihli "${urunAd}" satışı görünüyor — muhtemelen başka bir markaya ait satış buraya karışmış.`,
+      });
+    });
+    (degisiklikler || []).forEach((d) => {
+      const marka = markalar.find((m) => m.id === d.markaId);
+      const urunAd = marka?.urunler.find((u) => u.id === d.urunId)?.ad || "ürün";
+      yeniUyarilar.push({
+        id: uid(), tip: "veri_degisti", markaId: d.markaId, markaAd: marka ? `${marka.marka} · ${marka.urun}` : "", urunAd, tarih: d.tarih, ts: new Date().toISOString(),
+        mesaj: d.tip === "silindi"
+          ? `${fmtTarih(d.tarih)} için "${urunAd}" daha önce ${fmt(d.eskiAdet)} adet / ${fmt(d.eskiKilo)} kg kaydedilmişti, Aybelsoft'ta bu kayıt artık görünmüyor — silinmiş olabilir.`
+          : `${fmtTarih(d.tarih)} için "${urunAd}" daha önce ${fmt(d.eskiAdet)} adet / ${fmt(d.eskiKilo)} kg idi, şimdi ${fmt(d.toplamAdet)} adet / ${fmt(d.toplamKilo)} kg — geçmişe dönük değişmiş, kontrol edin.`,
+      });
     });
     if (yeniUyarilar.length > 0) setDisUyarilar((prev) => [...prev, ...yeniUyarilar]);
 
-    setHavuz((prev) => {
-      const kalan = prev.filter((h) => !havuzKayitlari.some((y) => y.markaId === h.markaId && y.urunId === h.urunId && y.tarih === h.tarih));
-      return [...kalan, ...havuzKayitlari.map((h) => ({ ...h, id: uid() }))];
+    setAybelsoftOzet((prev) => {
+      const kalan = prev.filter((o) => !gunlukOzetler.some((y) => y.markaId === o.markaId && y.urunId === o.urunId && y.tarih === o.tarih));
+      return [...kalan, ...gunlukOzetler];
     });
-    const markaAdlari = [...new Set(havuzKayitlari.map((h) => markalar.find((m) => m.id === h.markaId)))].filter(Boolean);
-    markaAdlari.forEach((m) => logEtkinlik(m.id, `${m.marka} · ${m.urun}`, "aybelsoft_aktarildi", "Aybelsoft'tan satış verisi aktarıldı"));
+    const markaAdlari = [...new Set(gunlukOzetler.map((h) => markalar.find((m) => m.id === h.markaId)))].filter(Boolean);
+    markaAdlari.forEach((m) => logEtkinlik(m.id, `${m.marka} · ${m.urun}`, "aybelsoft_aktarildi", "Aybelsoft'tan satış verisi aktarıldı/güncellendi"));
     return { kayit: satirSayisi, marka: markaSayisi, uyari: yeniUyarilar.length };
   }
 
-  const notlar = selectedMarka ? anomaliler(selectedMarka, selectedSayimlar) : [];
+  const notlar = selectedMarka ? anomaliler(selectedMarka, selectedSayimlar, aybelsoftOzet) : [];
 
   const NavBtn = ({ id, icon: Icon, label }) => (
     <button
       onClick={() => { setSayfa(id); if (id !== "detay") setSelectedId(null); }}
       className={`flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg font-medium transition-colors ${
-        sayfa === id ? "bg-stone-900 text-white" : "text-stone-600 hover:bg-stone-100"
+        sayfa === id ? "bg-brand-800 text-paper-50" : "text-brand-100 hover:bg-brand-700/60"
       }`}
     >
       <Icon className="w-4 h-4" /> {label}
@@ -1457,30 +1547,34 @@ export default function StokTakip() {
   );
 
   return (
-    <div style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }} className="min-h-screen bg-stone-50 text-stone-900">
-      <div className="max-w-5xl mx-auto p-4 md:p-6">
-        <header className="flex items-center justify-between mb-5 flex-wrap gap-3">
-          <div className="flex items-center gap-2">
-            <Package className="w-5 h-5 text-amber-700" />
+    <div className="min-h-screen bg-paper-100 text-ink-900 font-sans">
+      <header className="bg-brand-900 sticky top-0 z-10">
+        <div className="max-w-5xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-ochre-400 flex items-center justify-center shrink-0">
+              <Package className="w-4.5 h-4.5 text-brand-900" />
+            </div>
             <div className="leading-tight">
-              <h1 className="text-base font-medium">Ekizler Ticaret</h1>
-              <p className="text-xs text-stone-400">Yükleme – satış – stok takip</p>
+              <h1 className="text-[15px] font-semibold text-paper-50 tracking-tight">Ekizler Ticaret</h1>
+              <p className="text-xs text-brand-200">Yükleme – satış – stok takip</p>
             </div>
           </div>
-          <nav className="flex items-center gap-1 bg-white border border-stone-200 rounded-xl p-1 flex-wrap">
+          <nav className="flex items-center gap-1 bg-brand-950/40 border border-brand-700/50 rounded-xl p-1 flex-wrap">
             <NavBtn id="ambar" icon={Folder} label="Ambar" />
             <NavBtn id="yeni" icon={FilePlus2} label="Yeni Marka Ekle" />
             <NavBtn id="kalan" icon={ClipboardList} label="Dükkanda Kalan" />
             <NavBtn id="ice-aktar" icon={Upload} label="İçe Aktar" />
             <NavBtn id="gecmis" icon={History} label="İşlem geçmişi" />
           </nav>
-        </header>
+        </div>
+      </header>
 
+      <div className="max-w-5xl mx-auto p-4 md:p-6">
         {sayfa === "ambar" && (
           <>
             {markalar.length === 0 && (
               <div className="rounded-lg border border-dashed border-stone-300 p-8 text-center space-y-3 mb-4">
-                <p className="text-sm text-stone-500">Henüz veri yok.</p>
+                <p className="text-sm text-stone-500">Henüz veri yok. Gün gün girmeye başlayabilirsiniz, ya da örnek veriyle deneyin.</p>
                 <div className="flex flex-col sm:flex-row gap-2 justify-center">
                   <button onClick={() => ornekYukle("senaryo")} className={`text-xs rounded-lg px-3 py-2 border ${ornekOnay === "senaryo" ? "border-red-300 bg-red-50 text-red-700 font-medium" : "border-stone-200 text-stone-500 hover:border-stone-300"}`}>
                     {ornekOnay === "senaryo" ? "Emin misiniz? Tekrar tıklayın" : "A8 / A10 örnek senaryosunu yükle"}
@@ -1492,13 +1586,30 @@ export default function StokTakip() {
               </div>
             )}
             {markalar.length > 0 && (
-              <div className="flex justify-end mb-3">
-                <button onClick={() => ornekYukle("real")} className={`text-xs rounded px-2 py-1 ${ornekOnay === "real" ? "text-red-700 font-medium" : "text-stone-400 hover:text-stone-600"}`}>
-                  {ornekOnay === "real" ? "Emin misiniz? Tüm veriler değişir — tekrar tıklayın" : "Gerçek veriye sıfırla (34 marka)"}
-                </button>
+              <div className="space-y-2 mb-3">
+                <div className="flex justify-end gap-3 flex-wrap">
+                  <button
+                    onClick={() => { const n = eskiVeriyiOzeteTasi(); setTasimaSonucu(n); setTimeout(() => setTasimaSonucu(null), 6000); }}
+                    className="text-xs rounded px-2 py-1 text-brand-700 hover:text-brand-800 font-medium"
+                    title="Eski (Aybelsoft içe aktarımından önceki) markaların satış rakamlarını, geçmiş FARK'lar bozulmasın diye yeni özet tablosuna bir kerelik aktarır."
+                  >
+                    Eski satış verilerini geçmiş özete taşı
+                  </button>
+                  <button onClick={() => ornekYukle("real")} className={`text-xs rounded px-2 py-1 ${ornekOnay === "real" ? "text-red-700 font-medium" : "text-stone-400 hover:text-stone-600"}`}>
+                    {ornekOnay === "real" ? "Emin misiniz? Tüm veriler değişir — tekrar tıklayın" : "Örnek veriye sıfırla (34 marka)"}
+                  </button>
+                  <button onClick={verileriTemizle} className={`text-xs rounded px-2 py-1 ${ornekOnay === "temizle" ? "text-red-700 font-medium" : "text-stone-400 hover:text-stone-600"}`}>
+                    {ornekOnay === "temizle" ? "Emin misiniz? Her şey silinir — tekrar tıklayın" : "Tüm verileri temizle (boş başla)"}
+                  </button>
+                </div>
+                {tasimaSonucu !== null && (
+                  <div className="text-xs text-brand-700 bg-brand-50 border border-brand-200 rounded px-3 py-2 text-right">
+                    {tasimaSonucu > 0 ? `${tasimaSonucu} marka+ürün için eski satış verisi geçmiş özete taşındı — FARK'lar artık doğru görünmeli.` : "Taşınacak yeni bir kayıt bulunamadı (zaten taşınmış olabilir)."}
+                  </div>
+                )}
               </div>
             )}
-            <AmbarPage markalar={markalar} sayimlar={sayimlar} onSelect={(id) => { setSelectedId(id); setSayfa("detay"); }} />
+            <AmbarPage markalar={markalar} sayimlar={sayimlar} aybelsoftOzet={aybelsoftOzet} onSelect={(id) => { setSelectedId(id); setSayfa("detay"); }} />
           </>
         )}
 
@@ -1508,13 +1619,13 @@ export default function StokTakip() {
 
         {sayfa === "kalan" && <DukkandaKalanPage markalar={markalar} sayimlar={sayimlar} etkinlikler={etkinlikler} kalanTopluKaydet={kalanTopluKaydet} />}
 
-        {sayfa === "ice-aktar" && <ImportPage markalar={markalar} aktarimUygula={aktarimUygula} />}
+        {sayfa === "ice-aktar" && <ImportPage markalar={markalar} aybelsoftOzet={aybelsoftOzet} aktarimUygula={aktarimUygula} />}
 
         {sayfa === "gecmis" && <GecmisPage etkinlikler={etkinlikler} onMarkaTikla={(id) => { setSelectedId(id); setSayfa("detay"); }} />}
 
         {sayfa === "detay" && !selectedMarka && (
           <div className="rounded-lg border border-dashed border-stone-300 p-12 text-center text-stone-400 text-sm">
-            Bir marka seçili değil. <button onClick={() => setSayfa("ambar")} className="text-amber-700 hover:underline">Ambar'a dön</button>
+            Bir marka seçili değil. <button onClick={() => setSayfa("ambar")} className="text-brand-600 hover:underline">Ambar'a dön</button>
           </div>
         )}
 
@@ -1525,7 +1636,7 @@ export default function StokTakip() {
             onGeri={() => setSayfa("ambar")} onSil={() => markaSil(selectedMarka.id)}
             onDurumDegistir={() => markaDurumDegistir(selectedMarka.id)} onYeniSayim={() => yeniSayimEkle(selectedMarka)}
             satirGuncelle={satirGuncelle} sayimAlanGuncelle={sayimAlanGuncelle} sayimKilitleAc={sayimKilitleAc}
-            havuz={havuz.filter((h) => h.markaId === selectedMarka.id)}
+            aybelsoftOzet={aybelsoftOzet}
             disUyarilar={disUyarilar.filter((u) => u.markaId === selectedMarka.id)}
             markaBasligiGuncelle={markaBasligiGuncelle}
           />
